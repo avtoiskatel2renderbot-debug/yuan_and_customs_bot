@@ -1,15 +1,12 @@
 import os
 import logging
-import asyncio
 import requests
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from flask import Flask
 from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    ConversationHandler, MessageHandler, filters, ContextTypes
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
@@ -31,7 +28,7 @@ def run_flask():
     flask_app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 
-# ===== КУРСЫ =====
+# ===== КУРС ЕВРО ЦБ РФ =====
 def get_cbr_rate(code):
     try:
         url = "https://www.cbr.ru/scripts/XML_daily.asp"
@@ -48,9 +45,18 @@ def get_cbr_rate(code):
     return None
 
 
+# ===== КУРС ЮАНЯ ВТБ (несколько источников) =====
 def get_vtb_yuan():
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "ru-RU,ru;q=0.9",
+    }
+    
+    # Источник 1: прямой API ВТБ
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
         url = "https://www.vtb.ru/api/currency-exchange/table-info?contextItemId=%7B5A68BC3E-814E-4B85-8E63-D91582A4B831%7D&conversionPlace=card&conversionType=CashlessCNY"
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
@@ -58,102 +64,155 @@ def get_vtb_yuan():
             for group in data.get("GroupedRates", []):
                 for rate in group.get("MonoCurrencyRates", []):
                     if rate.get("CurrencyAbbreviation") == "CNY":
-                        return {
-                            "buy": rate.get("BankBuyAt"),
-                            "sell": rate.get("BankSellAt"),
-                            "source": "ВТБ (безналичный)"
-                        }
+                        buy = rate.get("BankBuyAt")
+                        sell = rate.get("BankSellAt")
+                        if buy and sell:
+                            return {"buy": buy, "sell": sell, "source": "ВТБ (официальный API)"}
     except Exception as e:
-        logger.error(f"VTB error: {e}")
+        logger.error(f"VTB API error: {e}")
     
-    # Резерв: ЦБ РФ
+    # Источник 2: bankiros.ru
+    try:
+        url = "https://bankiros.ru/bank/vtb/currency/cny"
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            text = r.text
+            import re
+            matches = re.findall(r'(\d{1,3}[.,]\d{2,4})', text)
+            if len(matches) >= 2:
+                rates = [float(m.replace(",", ".")) for m in matches if 5 < float(m.replace(",", ".")) < 30]
+                if len(rates) >= 2:
+                    return {"buy": rates[0], "sell": rates[1], "source": "bankiros.ru (ВТБ)"}
+    except Exception as e:
+        logger.error(f"bankiros error: {e}")
+    
+    # Источник 3: myfin.by
+    try:
+        url = "https://myfin.by/bank/vtb/kurs-valut"
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            import re
+            text = r.text
+            cny_section = re.search(r'CNY.{0,500}', text)
+            if cny_section:
+                matches = re.findall(r'(\d{1,3}[.,]\d{2,4})', cny_section.group())
+                rates = [float(m.replace(",", ".")) for m in matches if 5 < float(m.replace(",", ".")) < 30]
+                if len(rates) >= 2:
+                    return {"buy": rates[0], "sell": rates[1], "source": "myfin.by (ВТБ)"}
+    except Exception as e:
+        logger.error(f"myfin error: {e}")
+    
+    # Резервный источник: ЦБ РФ
     cb = get_cbr_rate("CNY")
     if cb:
         return {
             "buy": round(cb * 0.97, 4),
             "sell": round(cb * 1.03, 4),
-            "source": "ЦБ РФ ±3% (ВТБ недоступен)"
+            "source": "ЦБ РФ ±3% (источники ВТБ недоступны)"
         }
     return None
 
 
-# ===== ТАМОЖНЯ =====
-def calc_customs(price_eur, engine_cc, engine_type, age, euro_rate):
-    price_rub = price_eur * euro_rate
-    
-    if engine_type == "electric":
-        duty_eur = price_eur * 0.15
-    elif age == "new":
-        if price_eur <= 8500:
-            duty_eur = max(price_eur * 0.54, engine_cc * 2.5)
-        elif price_eur <= 16700:
-            duty_eur = max(price_eur * 0.48, engine_cc * 3.5)
-        elif price_eur <= 42300:
-            duty_eur = max(price_eur * 0.48, engine_cc * 5.5)
-        elif price_eur <= 84500:
-            duty_eur = max(price_eur * 0.48, engine_cc * 7.5)
-        elif price_eur <= 169000:
-            duty_eur = max(price_eur * 0.48, engine_cc * 15.0)
-        else:
-            duty_eur = max(price_eur * 0.48, engine_cc * 20.0)
-    elif age == "3to5":
-        if engine_cc <= 1000: duty_eur = engine_cc * 1.5
-        elif engine_cc <= 1500: duty_eur = engine_cc * 1.7
-        elif engine_cc <= 1800: duty_eur = engine_cc * 2.5
-        elif engine_cc <= 2300: duty_eur = engine_cc * 2.7
-        elif engine_cc <= 3000: duty_eur = engine_cc * 3.0
-        else: duty_eur = engine_cc * 3.6
-    else:  # over5
-        if engine_cc <= 1000: duty_eur = engine_cc * 3.0
-        elif engine_cc <= 1500: duty_eur = engine_cc * 3.2
-        elif engine_cc <= 1800: duty_eur = engine_cc * 3.5
-        elif engine_cc <= 2300: duty_eur = engine_cc * 4.8
-        elif engine_cc <= 3000: duty_eur = engine_cc * 5.0
-        else: duty_eur = engine_cc * 5.7
-    
-    duty_rub = duty_eur * euro_rate
-    
-    if age == "new":
-        util = 3400 * 0.17
-    else:
-        util = 3400 * 0.26
-    
-    if price_rub <= 200000: proc = 775
-    elif price_rub <= 450000: proc = 1550
-    elif price_rub <= 1200000: proc = 3100
-    elif price_rub <= 2700000: proc = 8530
-    elif price_rub <= 4200000: proc = 12000
-    elif price_rub <= 5500000: proc = 15500
-    elif price_rub <= 7000000: proc = 20000
-    else: proc = 30000
-    
-    total = duty_rub + util + proc
-    return {
-        "price_eur": price_eur,
-        "price_rub": round(price_rub, 2),
-        "duty_eur": round(duty_eur, 2),
-        "duty_rub": round(duty_rub, 2),
-        "util": round(util, 2),
-        "proc": round(proc, 2),
-        "total": round(total, 2),
-        "euro": euro_rate
-    }
+# ===== СТАВКИ ПОШЛИН =====
+def get_duty_rate(volume_cc, is_old):
+    """Возвращает ставку €/см³ для проходных (False) или непроходных (True)"""
+    if not is_old:  # 3-5 лет (проходные)
+        if volume_cc <= 1000: return 1.5
+        elif volume_cc <= 1500: return 1.7
+        elif volume_cc <= 1800: return 2.5
+        elif volume_cc <= 2300: return 2.7
+        elif volume_cc <= 3000: return 3.0
+        else: return 3.6
+    else:  # старше 5 лет (непроходные)
+        if volume_cc <= 1000: return 3.0
+        elif volume_cc <= 1500: return 3.2
+        elif volume_cc <= 1800: return 3.5
+        elif volume_cc <= 2300: return 4.8
+        elif volume_cc <= 3000: return 5.0
+        else: return 5.7
 
 
-# ===== СОСТОЯНИЯ =====
-ASK_PRICE, ASK_TYPE, ASK_CC, ASK_AGE = range(4)
+def format_money(amount):
+    """Форматирует число с пробелами: 337376 -> 337 376"""
+    return f"{int(round(amount)):,}".replace(",", " ")
+
+
+def build_duty_table():
+    """Строит таблицу пошлин по образцу пользователя"""
+    euro_rate = get_cbr_rate("EUR")
+    if not euro_rate:
+        return None
+    
+    volumes = [660, 1000, 1200, 1300, 1400, 1500, 1600, 1800,
+               2000, 2200, 2300, 2400, 2500, 2700, 2800, 3000]
+    
+    today = datetime.now().strftime("%d.%m.%Y")
+    
+    # Заголовок
+    text = f"📊 *Расчёт таможенных пошлин на автомобили*\n\n"
+    text += f"📅 Дата расчёта: *{today}*\n"
+    text += f"💶 Курс евро ЦБ: *{euro_rate:.2f} ₽*\n\n"
+    
+    # Проходные годы
+    text += "💡 *Автомобили проходных годов (3–5 лет)*\n"
+    text += "```\n"
+    text += "Объём  Ставка    Пошлина\n"
+    text += "─────────────────────────\n"
+    for v in volumes:
+        rate = get_duty_rate(v, is_old=False)
+        duty_rub = v * rate * euro_rate
+        text += f"{v:<5}  {rate}€    {format_money(duty_rub):>10} ₽\n"
+    text += "```\n\n"
+    
+    # Непроходные
+    text += "💡 *Автомобили непроходных годов (старше 5 лет)*\n"
+    text += "```\n"
+    text += "Объём  Ставка    Пошлина\n"
+    text += "─────────────────────────\n"
+    for v in volumes:
+        rate = get_duty_rate(v, is_old=True)
+        duty_rub = v * rate * euro_rate
+        text += f"{v:<5}  {rate}€    {format_money(duty_rub):>10} ₽\n"
+    text += "```\n\n"
+    
+    # Примечания
+    text += "📌 Льготный утилизационный сбор для авто мощностью "
+    text += "до 160 л.с. составляет *5 200 ₽*\n"
+    text += "_(для авто младше 3 лет — 3 400 ₽)_\n\n"
+    text += "📌 Автомобили мощнее 160 л.с. переходят в категорию "
+    text += "с коммерческими ставками\n\n"
+    text += "📌 Таможенные сборы за таможенные операции зависят "
+    text += "от стоимости автомобиля\n\n"
+    
+    # Контакты
+    text += "📥 *Заказать авто:*\n"
+    text += "👉 https://t.me/avtoiskatelgroup\n\n"
+    text += "Если у вас есть вопросы по подбору авто, "
+    text += "будем рады помочь 👇\n"
+    text += "📱 *Свяжитесь с нами:*\n"
+    text += "📞 +7 995 870 33 09 (Кирилл) — Руководитель отдела продаж\n"
+    text += "📞 +7 908 999 60 09 (Сергей) — Руководитель\n\n"
+    text += "🚛 Работаем по всей России\n"
+    text += "TopCar\\_25 — привозим технику и автомобили "
+    text += "под заказ из Китая, Японии и Кореи.\n\n"
+    text += "#РАСЧЁТ\\_ПОШЛИНЫ"
+    
+    return text
 
 
 # ===== ХЭНДЛЕРЫ =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
         [InlineKeyboardButton("💴 Курс юаня ВТБ", callback_data="yuan")],
-        [InlineKeyboardButton("📊 Курс евро ЦБ", callback_data="euro")],
-        [InlineKeyboardButton("🚗 Расчёт растаможки", callback_data="customs")],
+        [InlineKeyboardButton("📊 Расчёт пошлин", callback_data="duty")],
     ]
     text = (
-        "🤖 *Бот курсов и растаможки*\n\n"
-        "Выберите действие:"
+        "🤖 *TopCar_25 — бот расчётов*\n\n"
+        "Выберите действие:\n\n"
+        "💴 *Курс юаня ВТБ* — актуальный курс CNY "
+        "для международных переводов\n\n"
+        "📊 *Расчёт пошлин* — таблица таможенных "
+        "пошлин по объёмам двигателя"
     )
     if update.callback_query:
         await update.callback_query.answer()
@@ -169,7 +228,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_yuan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("⏳ Загружаю курс юаня...")
+    await query.edit_message_text("⏳ Загружаю курс юаня ВТБ...")
     
     data = get_vtb_yuan()
     kb = [
@@ -179,11 +238,12 @@ async def show_yuan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data:
         text = (
-            f"💴 *Курс юаня (CNY)*\n"
+            f"💴 *Курс юаня (CNY) для переводов*\n"
             f"_Источник: {data['source']}_\n\n"
             f"📈 Покупка: *{data['buy']} ₽*\n"
             f"📉 Продажа: *{data['sell']} ₽*\n\n"
-            f"💡 При переводе через ВТБ используется курс продажи"
+            f"💡 При международном переводе через ВТБ "
+            f"используется курс продажи банка"
         )
     else:
         text = "❌ Не удалось получить курс. Попробуйте позже."
@@ -193,204 +253,45 @@ async def show_yuan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def show_euro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_duty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("⏳ Загружаю курс евро...")
+    await query.edit_message_text("⏳ Считаю пошлины по актуальному курсу ЦБ...")
     
-    rate = get_cbr_rate("EUR")
+    text = build_duty_table()
     kb = [
-        [InlineKeyboardButton("🔄 Обновить", callback_data="euro")],
+        [InlineKeyboardButton("🔄 Обновить", callback_data="duty")],
         [InlineKeyboardButton("◀️ В меню", callback_data="menu")],
     ]
     
-    if rate:
-        text = (
-            f"📊 *Курс евро ЦБ РФ*\n\n"
-            f"💶 1 EUR = *{round(rate, 4)} ₽*"
+    if text:
+        await query.edit_message_text(
+            text, reply_markup=InlineKeyboardMarkup(kb),
+            parse_mode="Markdown", disable_web_page_preview=True
         )
     else:
-        text = "❌ Не удалось получить курс."
-    
-    await query.edit_message_text(
-        text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
-    )
-
-
-async def customs_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(
-        "🚗 *Расчёт растаможки*\n\n"
-        "Шаг 1/4: введите стоимость авто в *евро* (например: 15000)\n\n"
-        "Для отмены: /cancel",
-        parse_mode="Markdown"
-    )
-    return ASK_PRICE
-
-
-async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        price = float(update.message.text.replace(",", ".").replace(" ", ""))
-        if price <= 0: raise ValueError
-    except:
-        await update.message.reply_text("❌ Введите число, например: 15000")
-        return ASK_PRICE
-    
-    context.user_data["price"] = price
-    kb = [
-        [InlineKeyboardButton("⛽ Бензин", callback_data="t_petrol"),
-         InlineKeyboardButton("🛢 Дизель", callback_data="t_diesel")],
-        [InlineKeyboardButton("⚡ Электро", callback_data="t_electric"),
-         InlineKeyboardButton("🔄 Гибрид", callback_data="t_hybrid")],
-    ]
-    await update.message.reply_text(
-        "Шаг 2/4: выберите тип двигателя",
-        reply_markup=InlineKeyboardMarkup(kb)
-    )
-    return ASK_TYPE
-
-
-async def get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    engine_map = {"t_petrol": "petrol", "t_diesel": "diesel",
-                  "t_electric": "electric", "t_hybrid": "hybrid"}
-    engine_type = engine_map[query.data]
-    context.user_data["type"] = engine_type
-    
-    if engine_type == "electric":
-        context.user_data["cc"] = 0
-        kb = [
-            [InlineKeyboardButton("🆕 До 3 лет", callback_data="a_new")],
-            [InlineKeyboardButton("📅 3-5 лет", callback_data="a_3to5")],
-            [InlineKeyboardButton("📆 Старше 5 лет", callback_data="a_over5")],
-        ]
         await query.edit_message_text(
-            "Шаг 3/4: выберите возраст авто",
+            "❌ Не удалось получить курс ЦБ. Попробуйте позже.",
             reply_markup=InlineKeyboardMarkup(kb)
         )
-        return ASK_AGE
-    
-    await query.edit_message_text(
-        "Шаг 3/4: введите объём двигателя в см³ (например: 1600)"
-    )
-    return ASK_CC
-
-
-async def get_cc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        cc = int(update.message.text.strip())
-        if cc <= 0 or cc > 20000: raise ValueError
-    except:
-        await update.message.reply_text("❌ Введите число от 1 до 20000")
-        return ASK_CC
-    
-    context.user_data["cc"] = cc
-    kb = [
-        [InlineKeyboardButton("🆕 До 3 лет", callback_data="a_new")],
-        [InlineKeyboardButton("📅 3-5 лет", callback_data="a_3to5")],
-        [InlineKeyboardButton("📆 Старше 5 лет", callback_data="a_over5")],
-    ]
-    await update.message.reply_text(
-        "Шаг 4/4: выберите возраст авто",
-        reply_markup=InlineKeyboardMarkup(kb)
-    )
-    return ASK_AGE
-
-
-async def get_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    age_map = {"a_new": "new", "a_3to5": "3to5", "a_over5": "over5"}
-    age = age_map[query.data]
-    
-    await query.edit_message_text("⏳ Считаю...")
-    
-    euro = get_cbr_rate("EUR")
-    if not euro:
-        await query.edit_message_text("❌ Не удалось получить курс евро")
-        return ConversationHandler.END
-    
-    r = calc_customs(
-        context.user_data["price"],
-        context.user_data["cc"],
-        context.user_data["type"],
-        age,
-        euro
-    )
-    
-    age_names = {"new": "До 3 лет", "3to5": "3-5 лет", "over5": "Старше 5 лет"}
-    type_names = {"petrol": "Бензин", "diesel": "Дизель",
-                  "electric": "Электро", "hybrid": "Гибрид"}
-    
-    cc_line = ""
-    if context.user_data["type"] != "electric":
-        cc_line = f"🔧 Объём: *{context.user_data['cc']} см³*\n"
-    
-    text = (
-        f"🚗 *РЕЗУЛЬТАТ РАСЧЁТА*\n"
-        f"{'─' * 25}\n"
-        f"💰 Стоимость: *{r['price_eur']:,.0f} EUR*\n"
-        f"   ({r['price_rub']:,.0f} ₽)\n"
-        f"⚙️ Двигатель: *{type_names[context.user_data['type']]}*\n"
-        f"{cc_line}"
-        f"📅 Возраст: *{age_names[age]}*\n"
-        f"{'─' * 25}\n"
-        f"🏛 Пошлина: *{r['duty_rub']:,.0f} ₽*\n"
-        f"♻️ Утильсбор: *{r['util']:,.0f} ₽*\n"
-        f"📝 Сбор: *{r['proc']:,.0f} ₽*\n"
-        f"{'─' * 25}\n"
-        f"💵 *ИТОГО: {r['total']:,.0f} ₽*\n"
-        f"{'─' * 25}\n"
-        f"💶 Курс EUR: {euro:.4f} ₽\n\n"
-        f"⚠️ _Расчёт приблизительный_"
-    )
-    
-    kb = [
-        [InlineKeyboardButton("🔄 Новый расчёт", callback_data="customs")],
-        [InlineKeyboardButton("◀️ В меню", callback_data="menu")],
-    ]
-    await query.edit_message_text(
-        text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown"
-    )
-    return ConversationHandler.END
-
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Отменено. /start для меню")
-    return ConversationHandler.END
 
 
 async def button_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = update.callback_query.data
-    if data == "yuan": await show_yuan(update, context)
-    elif data == "euro": await show_euro(update, context)
-    elif data == "menu": await start(update, context)
+    if data == "yuan":
+        await show_yuan(update, context)
+    elif data == "duty":
+        await show_duty(update, context)
+    elif data == "menu":
+        await start(update, context)
 
 
 # ===== ЗАПУСК =====
 def main():
-    # Flask в отдельном потоке
     Thread(target=run_flask, daemon=True).start()
     
     app = Application.builder().token(BOT_TOKEN).build()
-    
-    conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(customs_start, pattern="^customs$")],
-        states={
-            ASK_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_price)],
-            ASK_TYPE: [CallbackQueryHandler(get_type, pattern="^t_")],
-            ASK_CC: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_cc)],
-            ASK_AGE: [CallbackQueryHandler(get_age, pattern="^a_")],
-        },
-        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("start", start)],
-    )
-    
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(button_router))
     
     logger.info("Бот запущен!")
