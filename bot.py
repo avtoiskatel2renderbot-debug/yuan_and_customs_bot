@@ -59,7 +59,9 @@ def get_sheet():
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive"
         ]
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        creds = Credentials.from_service_account_info(
+            creds_dict, scopes=scopes
+        )
         client = gspread.authorize(creds)
         return client.open_by_key(SHEET_ID)
     except Exception as e:
@@ -72,7 +74,6 @@ def get_worksheet(name):
         return sh.worksheet(name)
     return None
 
-# ===== СЛЕДУЮЩИЙ ID =====
 def get_next_id(sheet_name, prefix, col=0):
     try:
         ws = get_worksheet(sheet_name)
@@ -95,14 +96,12 @@ def get_next_id(sheet_name, prefix, col=0):
         logger.error(f"get_next_id error: {e}")
         return f"{prefix}-001"
 
-# ===== ПОЛУЧИТЬ ВСЕ МАШИНЫ =====
 def get_all_cars():
     try:
         ws = get_worksheet("МАШИНЫ")
         if not ws:
             return []
-        records = ws.get_all_records()
-        return records
+        return ws.get_all_records()
     except Exception as e:
         logger.error(f"get_all_cars error: {e}")
         return []
@@ -117,7 +116,9 @@ def get_cbr_rate(code):
         for v in root.findall("Valute"):
             if v.find("CharCode").text == code:
                 nominal = int(v.find("Nominal").text)
-                value = float(v.find("Value").text.replace(",", "."))
+                value = float(
+                    v.find("Value").text.replace(",", ".")
+                )
                 return value / nominal
     except Exception as e:
         logger.error(f"CBR error: {e}")
@@ -132,8 +133,6 @@ def get_vtb_yuan():
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "ru-RU,ru;q=0.9",
     }
-
-    # Источник 1: API ВТБ — интернет-банк
     try:
         url = (
             "https://www.vtb.ru/api/currency-exchange/table-info"
@@ -153,12 +152,10 @@ def get_vtb_yuan():
                             return {
                                 "buy": buy,
                                 "sell": sell,
-                                "source": "ВТБ Интернет-банк (официальный)"
+                                "source": "ВТБ Интернет-банк"
                             }
     except Exception as e:
-        logger.error(f"VTB online API error: {e}")
-
-    # Источник 2: API ВТБ — мобильный банк
+        logger.error(f"VTB online error: {e}")
     try:
         url = (
             "https://www.vtb.ru/api/currency-exchange/table-info"
@@ -178,18 +175,16 @@ def get_vtb_yuan():
                             return {
                                 "buy": buy,
                                 "sell": sell,
-                                "source": "ВТБ Мобильный банк (официальный)"
+                                "source": "ВТБ Мобильный банк"
                             }
     except Exception as e:
-        logger.error(f"VTB mobile API error: {e}")
-
-    # Резервный: ЦБ РФ
+        logger.error(f"VTB mobile error: {e}")
     cb = get_cbr_rate("CNY")
     if cb:
         return {
             "buy": round(cb * 0.98, 4),
             "sell": round(cb * 1.02, 4),
-            "source": "ЦБ РФ ±2% (ВТБ временно недоступен)"
+            "source": "ЦБ РФ ±2% (ВТБ недоступен)"
         }
     return None
 
@@ -223,10 +218,10 @@ def build_duty_table():
         2400, 2500, 2700, 2800, 3000
     ]
     today = datetime.now().strftime("%d.%m.%Y")
-    text = f"📊 *Расчёт таможенных пошлин на автомобили*\n\n"
-    text += f"📅 Дата расчёта: *{today}*\n"
+    text = f"📊 *Расчёт таможенных пошлин*\n\n"
+    text += f"📅 Дата: *{today}*\n"
     text += f"💶 Курс евро ЦБ: *{euro_rate:.2f} ₽*\n\n"
-    text += "💡 *Автомобили проходных годов (3–5 лет)*\n"
+    text += "💡 *Проходные годы (3–5 лет)*\n"
     text += "```\n"
     text += "Объём  Ставка    Пошлина\n"
     text += "─────────────────────────\n"
@@ -235,7 +230,7 @@ def build_duty_table():
         duty_rub = v * rate * euro_rate
         text += f"{v:<5}  {rate}€    {format_money(duty_rub):>10} ₽\n"
     text += "```\n\n"
-    text += "💡 *Автомобили непроходных годов (старше 5 лет)*\n"
+    text += "💡 *Непроходные (старше 5 лет)*\n"
     text += "```\n"
     text += "Объём  Ставка    Пошлина\n"
     text += "─────────────────────────\n"
@@ -244,21 +239,225 @@ def build_duty_table():
         duty_rub = v * rate * euro_rate
         text += f"{v:<5}  {rate}€    {format_money(duty_rub):>10} ₽\n"
     text += "```\n\n"
-    text += "📌 Льготный утилизационный сбор для авто мощностью "
-    text += "до 160 л.с. составляет *5 200 ₽*\n"
-    text += "_(для авто младше 3 лет — 3 400 ₽)_\n\n"
-    text += "📌 Автомобили мощнее 160 л.с. переходят в категорию "
-    text += "с коммерческими ставками\n\n"
-    text += "📌 Таможенные сборы за таможенные операции зависят "
-    text += "от стоимости автомобиля\n\n"
+    text += "📌 Утильсбор до 160 л.с.: *5 200 ₽*\n"
+    text += "_(младше 3 лет — 3 400 ₽)_\n\n"
     text += "📥 *Заказать авто:*\n"
     text += "👉 https://t.me/avtoiskatelgroup\n\n"
-    text += "📱 *Свяжитесь с нами:*\n"
     text += "📞 +7 995 870 33 09 (Кирилл)\n"
     text += "📞 +7 908 999 60 09 (Сергей)\n\n"
-    text += "🚛 Работаем по всей России\n"
     text += "#РАСЧЁТ\\_ПОШЛИНЫ"
     return text
+
+# ===== ТЕКСТЫ ИНСТРУКЦИЙ =====
+INSTRUCTION_MAIN = """
+📖 *ИНСТРУКЦИЯ — ФИНАНСОВЫЙ РАЗДЕЛ*
+
+Этот раздел помогает вести учёт всех денег по каждой машине.
+
+*С чего начать:*
+1️⃣ Сначала добавь машину в раздел 🚗 *Машины*
+2️⃣ Потом записывай платежи через ➕ *Добавить платёж*
+3️⃣ Фиксируй долги в разделе ⚖️ *Долги*
+4️⃣ Зарплаты сотрудников — в разделе 👥 *Зарплаты*
+5️⃣ Смотри итоги в разделе 📊 *Отчёты*
+
+*Важный порядок:*
+❗ Нельзя добавить платёж или долг без машины.
+Всегда начинай с добавления машины.
+
+Нажми на раздел который непонятен 👇
+"""
+
+INSTRUCTION_CARS = """
+📖 *ИНСТРУКЦИЯ — РАЗДЕЛ "МАШИНЫ"*
+
+Здесь хранится список всех автомобилей.
+Каждой машине автоматически присваивается номер: AUTO-001, AUTO-002 и т.д.
+
+*Как добавить машину:*
+1️⃣ Нажми ➕ *Добавить машину*
+2️⃣ Бот будет задавать вопросы по шагам:
+   • Марка → напиши: *Zeekr*
+   • Модель → напиши: *001*
+   • Год → напиши: *2024*
+   • Цвет → напиши: *Белый*
+   • Комплектация → напиши: *Максимум*
+   • Пробег → напиши: *0* (для новых) или *15000*
+   • Клиент → напиши имя или название компании
+   • Тип клиента → выбери кнопку Физлицо или Юрлицо
+
+3️⃣ После добавления бот покажет карточку машины
+
+*Примеры клиентов:*
+👤 Физлицо → напиши: *Иванов Иван Иванович*
+🏢 Юрлицо → напиши: *ООО Автомир*
+   (бот сам добавит пометку "юр. лицо")
+
+*Что делать после добавления машины:*
+→ Переходи в ➕ *Добавить платёж* и записывай
+  все расходы и доходы по этой машине
+"""
+
+INSTRUCTION_PAY = """
+📖 *ИНСТРУКЦИЯ — РАЗДЕЛ "ПЛАТЕЖИ"*
+
+Здесь записываются все деньги которые 
+пришли или ушли по каждой машине.
+
+*Как добавить платёж:*
+1️⃣ Нажми ➕ *Добавить платёж*
+2️⃣ Выбери машину из списка
+3️⃣ Выбери категорию платежа:
+
+*📥 ДОХОДЫ (деньги которые получили):*
+• 💰 Накрутка — твоя прибыль с машины (юани)
+• 💵 Допы от клиента — клиент заплатил за допы (рубли)
+
+*📤 РАСХОДЫ (деньги которые потратили):*
+• 🚛 Автовоз — оплата доставки авто по России (рубли)
+• 🏛 Таможенный брокер — оплата брокеру (рубли)
+• 🔧 Допы в Китае — оплата доп.оборудования (юани)
+• ⛽ Бензин — расход на бензин (рубли)
+• 💸 Кэшбэк юрику — возврат процента дилеру (юани)
+• 👤 % Менеджеру — 20 000₽ фиксированно (рубли)
+
+4️⃣ Введи сумму цифрами: *2800* или *15000*
+5️⃣ Добавь комментарий или напиши *-* чтобы пропустить
+
+*Примеры когда что записывать:*
+
+Получил накрутку с машины AUTO-001:
+→ Выбери AUTO-001 → Накрутка → введи сумму в юанях
+
+Оплатил автовоз за AUTO-003:
+→ Выбери AUTO-003 → Автовоз → введи сумму в рублях
+
+Выплатил кэшбэк дилеру ООО Автомир:
+→ Выбери нужную машину → Кэшбэк юрику → сумма в юанях
+"""
+
+INSTRUCTION_DEBTS = """
+📖 *ИНСТРУКЦИЯ — РАЗДЕЛ "ДОЛГИ"*
+
+Здесь фиксируются все ситуации когда 
+кто-то кому-то должен денег.
+
+*Когда добавлять долг:*
+
+✅ *Клиент должен нам за допы* — клиент заказал 
+доп.оборудование но ещё не заплатил
+
+✅ *Мы должны клиенту* — клиент переплатил, 
+нужно вернуть деньги
+
+✅ *Мы должны поставщику за допы* — заказали 
+допы в Китае но ещё не оплатили
+
+✅ *Мы должны юрику кэшбэк* — дилер заработал 
+кэшбэк, нужно выплатить
+
+✅ *Мы должны менеджеру %* — менеджер привёл 
+клиента, нужно выплатить 20 000₽
+
+✅ *Мы должны брокеру* — ещё не оплатили 
+таможенного брокера
+
+✅ *Мы должны автовозу* — ещё не оплатили доставку
+
+*Как добавить долг:*
+1️⃣ Нажми ➕ *Добавить долг*
+2️⃣ Выбери машину
+3️⃣ Выбери тип долга
+4️⃣ Введи сумму
+
+*Как закрыть долг (когда оплатили):*
+1️⃣ Нажми ✅ *Закрыть долг*
+2️⃣ Выбери нужный долг из списка
+3️⃣ Долг помечается как оплачен
+
+*Важно:*
+❗ Долг — это НЕ платёж. Долг это обязательство.
+Когда долг оплачен — запиши платёж И закрой долг.
+"""
+
+INSTRUCTION_SAL = """
+📖 *ИНСТРУКЦИЯ — РАЗДЕЛ "ЗАРПЛАТЫ"*
+
+Здесь ведётся учёт зарплат всех сотрудников.
+
+*Как добавить зарплату:*
+1️⃣ Нажми ➕ *Добавить зарплату*
+2️⃣ Введи имя сотрудника: *Иванов Кирилл*
+3️⃣ Введи оклад цифрами: *30000*
+4️⃣ Введи бонус цифрами: *5000*
+   (если бонуса нет — напиши *0*)
+5️⃣ Введи месяц: *07.2026*
+
+Бот автоматически посчитает итого:
+оклад + бонус = сумма к выплате
+
+*Как отметить что зарплата выплачена:*
+1️⃣ Нажми ✅ *Отметить выплату*
+2️⃣ Выбери сотрудника из списка
+3️⃣ Бот отметит как выплачено и поставит дату
+
+*Пример — как вести зарплаты каждый месяц:*
+
+В начале месяца:
+→ Добавить зарплату → Иванов → 30000 → 0 → 07.2026
+
+В конце месяца когда выплатил:
+→ Отметить выплату → выбрать Иванова → готово
+
+*Что видно в списке:*
+❌ — зарплата ещё не выплачена
+✅ — зарплата выплачена
+"""
+
+INSTRUCTION_REPORTS = """
+📖 *ИНСТРУКЦИЯ — РАЗДЕЛ "ОТЧЁТЫ"*
+
+Здесь можно посмотреть финансовые итоги 
+за любой период или по конкретной машине.
+
+*Виды отчётов:*
+
+📅 *За день* — все платежи за сегодня
+   Когда использовать: в конце рабочего дня
+   чтобы проверить что всё записано
+
+📅 *За неделю* — платежи за последние 7 дней
+   Когда использовать: еженедельная сверка
+
+📅 *За месяц* — все платежи текущего месяца
+   Когда использовать: в конце месяца
+
+🚗 *По машине* — все платежи и долги 
+   по конкретному автомобилю
+   Когда использовать: чтобы увидеть
+   полную картину по одной сделке
+
+📈 *P&L* — прибыль и убытки за текущий месяц
+   Показывает:
+   • Все доходы (рубли и юани отдельно)
+   • Все расходы (рубли и юани отдельно)
+   • Зарплаты за месяц
+   • Итоговую прибыль
+   Когда использовать: раз в месяц
+   для общей картины бизнеса
+
+⚖️ *Все долги* — список всех открытых долгов
+   Когда использовать: перед выплатами,
+   чтобы понять кому что должны
+
+*Как читать отчёт:*
+📥 — это доход (деньги пришли)
+📤 — это расход (деньги ушли)
+¥ — юани
+₽ — рубли
+❌ — не оплачено
+✅ — оплачено
+"""
 
 # ===== ГЛАВНОЕ МЕНЮ =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -292,7 +491,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_yuan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("⏳ Загружаю курс юаня ВТБ (интернет-банк)...")
+    await query.edit_message_text(
+        "⏳ Загружаю курс юаня ВТБ (интернет-банк)..."
+    )
     data = get_vtb_yuan()
     kb = [
         [InlineKeyboardButton("🔄 Обновить", callback_data="yuan")],
@@ -304,8 +505,7 @@ async def show_yuan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"_Источник: {data['source']}_\n\n"
             f"📈 Покупка банком: *{data['buy']} ₽*\n"
             f"📉 Продажа банком: *{data['sell']} ₽*\n\n"
-            f"💡 Для международного перевода используется "
-            f"курс продажи банка"
+            f"💡 Для перевода используется курс продажи"
         )
     else:
         text = "❌ Не удалось получить курс. Попробуйте позже."
@@ -319,7 +519,9 @@ async def show_yuan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_duty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("⏳ Считаю пошлины по актуальному курсу ЦБ...")
+    await query.edit_message_text(
+        "⏳ Считаю пошлины по актуальному курсу ЦБ..."
+    )
     text = build_duty_table()
     kb = [
         [InlineKeyboardButton("🔄 Обновить", callback_data="duty")],
@@ -345,33 +547,27 @@ async def finance_enter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     saved_password = context.bot_data.get("finance_password")
 
-    # Если пароль ещё не задан
     if not saved_password:
         if user_id == BOSS_ID:
             kb = [[InlineKeyboardButton("◀️ В меню", callback_data="menu")]]
             await query.edit_message_text(
-                "🔐 *Пароль для финансового раздела не задан*\n\n"
-                "Введите новый пароль:",
+                "🔐 *Пароль не задан*\n\nВведите новый пароль:",
                 reply_markup=InlineKeyboardMarkup(kb),
                 parse_mode="Markdown"
             )
-            context.user_data["action"] = "set_password"
             return SET_PASSWORD
         else:
             kb = [[InlineKeyboardButton("◀️ В меню", callback_data="menu")]]
             await query.edit_message_text(
-                "🔒 Финансовый раздел защищён паролем.\n"
-                "Обратитесь к руководителю.",
+                "🔒 Раздел защищён. Обратитесь к руководителю.",
                 reply_markup=InlineKeyboardMarkup(kb)
             )
             return ConversationHandler.END
 
-    # Если пароль уже задан — проверяем сессию
     if context.user_data.get("finance_auth"):
         await show_finance_menu(query, context)
         return ConversationHandler.END
 
-    # Запрашиваем пароль
     kb = [[InlineKeyboardButton("◀️ В меню", callback_data="menu")]]
     await query.edit_message_text(
         "🔐 *Финансовый раздел*\n\nВведите пароль:",
@@ -380,26 +576,34 @@ async def finance_enter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ENTER_PASSWORD
 
-async def handle_set_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_set_password(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     password = update.message.text.strip()
     await update.message.delete()
     context.bot_data["finance_password"] = password
     context.user_data["finance_auth"] = True
-    kb = [[InlineKeyboardButton("💰 Открыть финансы", callback_data="finance_menu")]]
+    kb = [[InlineKeyboardButton(
+        "💰 Открыть финансы", callback_data="finance_menu"
+    )]]
     await update.message.chat.send_message(
-        "✅ *Пароль установлен!*\n\nТеперь финансовый раздел защищён.",
+        "✅ *Пароль установлен!*",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return ConversationHandler.END
 
-async def handle_enter_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_enter_password(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     password = update.message.text.strip()
     await update.message.delete()
     saved = context.bot_data.get("finance_password")
     if password == saved:
         context.user_data["finance_auth"] = True
-        kb = [[InlineKeyboardButton("💰 Открыть финансы", callback_data="finance_menu")]]
+        kb = [[InlineKeyboardButton(
+            "💰 Открыть финансы", callback_data="finance_menu"
+        )]]
         await update.message.chat.send_message(
             "✅ *Пароль верный!*",
             reply_markup=InlineKeyboardMarkup(kb),
@@ -408,7 +612,7 @@ async def handle_enter_password(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         kb = [[InlineKeyboardButton("◀️ В меню", callback_data="menu")]]
         await update.message.chat.send_message(
-            "❌ *Неверный пароль.*\n\nПопробуйте ещё раз или вернитесь в меню.",
+            "❌ *Неверный пароль.* Попробуйте ещё раз.",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
@@ -418,20 +622,29 @@ async def handle_enter_password(update: Update, context: ContextTypes.DEFAULT_TY
 async def show_finance_menu(query_or_update, context):
     kb = [
         [InlineKeyboardButton("🚗 Машины", callback_data="fin_cars")],
-        [InlineKeyboardButton("➕ Добавить платёж", callback_data="fin_pay")],
+        [InlineKeyboardButton(
+            "➕ Добавить платёж", callback_data="fin_pay"
+        )],
         [InlineKeyboardButton("⚖️ Долги", callback_data="fin_debts")],
         [InlineKeyboardButton("👥 Зарплаты", callback_data="fin_sal")],
         [InlineKeyboardButton("📊 Отчёты", callback_data="fin_reports")],
-        [InlineKeyboardButton("🔑 Сменить пароль", callback_data="fin_chpass")],
+        [InlineKeyboardButton(
+            "📖 Инструкция", callback_data="inst_main"
+        )],
+        [InlineKeyboardButton(
+            "🔑 Сменить пароль", callback_data="fin_chpass"
+        )],
         [InlineKeyboardButton("◀️ В меню", callback_data="menu")],
     ]
     text = (
         "💰 *Финансовый раздел*\n\n"
-        "🚗 *Машины* — список авто и добавление новых\n"
+        "🚗 *Машины* — список авто, добавление новых\n"
         "➕ *Платёж* — записать доход или расход\n"
         "⚖️ *Долги* — кто кому должен\n"
         "👥 *Зарплаты* — учёт зарплат сотрудников\n"
-        "📊 *Отчёты* — за день, неделю, месяц, P&L"
+        "📊 *Отчёты* — за день, неделю, месяц, P&L\n"
+        "📖 *Инструкция* — как пользоваться разделом\n\n"
+        "❗ *Начни с добавления машины*"
     )
     if hasattr(query_or_update, 'edit_message_text'):
         await query_or_update.edit_message_text(
@@ -446,7 +659,9 @@ async def show_finance_menu(query_or_update, context):
             parse_mode="Markdown"
         )
 
-async def finance_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def finance_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     if not context.user_data.get("finance_auth"):
@@ -454,23 +669,132 @@ async def finance_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await show_finance_menu(query, context)
 
+# ===== ИНСТРУКЦИИ =====
+async def show_instruction(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    instructions = {
+        "inst_main": (INSTRUCTION_MAIN, [
+            [InlineKeyboardButton(
+                "🚗 Инструкция: Машины",
+                callback_data="inst_cars"
+            )],
+            [InlineKeyboardButton(
+                "➕ Инструкция: Платежи",
+                callback_data="inst_pay"
+            )],
+            [InlineKeyboardButton(
+                "⚖️ Инструкция: Долги",
+                callback_data="inst_debts"
+            )],
+            [InlineKeyboardButton(
+                "👥 Инструкция: Зарплаты",
+                callback_data="inst_sal"
+            )],
+            [InlineKeyboardButton(
+                "📊 Инструкция: Отчёты",
+                callback_data="inst_reports"
+            )],
+            [InlineKeyboardButton(
+                "◀️ В финансы",
+                callback_data="finance_menu"
+            )],
+        ]),
+        "inst_cars": (INSTRUCTION_CARS, [
+            [InlineKeyboardButton(
+                "◀️ К инструкции",
+                callback_data="inst_main"
+            )],
+            [InlineKeyboardButton(
+                "🚗 Перейти в Машины",
+                callback_data="fin_cars"
+            )],
+        ]),
+        "inst_pay": (INSTRUCTION_PAY, [
+            [InlineKeyboardButton(
+                "◀️ К инструкции",
+                callback_data="inst_main"
+            )],
+            [InlineKeyboardButton(
+                "➕ Добавить платёж",
+                callback_data="fin_pay"
+            )],
+        ]),
+        "inst_debts": (INSTRUCTION_DEBTS, [
+            [InlineKeyboardButton(
+                "◀️ К инструкции",
+                callback_data="inst_main"
+            )],
+            [InlineKeyboardButton(
+                "⚖️ Перейти в Долги",
+                callback_data="fin_debts"
+            )],
+        ]),
+        "inst_sal": (INSTRUCTION_SAL, [
+            [InlineKeyboardButton(
+                "◀️ К инструкции",
+                callback_data="inst_main"
+            )],
+            [InlineKeyboardButton(
+                "👥 Перейти в Зарплаты",
+                callback_data="fin_sal"
+            )],
+        ]),
+        "inst_reports": (INSTRUCTION_REPORTS, [
+            [InlineKeyboardButton(
+                "◀️ К инструкции",
+                callback_data="inst_main"
+            )],
+            [InlineKeyboardButton(
+                "📊 Перейти в Отчёты",
+                callback_data="fin_reports"
+            )],
+        ]),
+    }
+
+    if data in instructions:
+        text, kb = instructions[data]
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(kb),
+            parse_mode="Markdown"
+        )
+
 # ===== МАШИНЫ =====
-async def fin_cars(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def fin_cars(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     cars = get_all_cars()
     kb = [
-        [InlineKeyboardButton("➕ Добавить машину", callback_data="add_car")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="finance_menu")],
+        [InlineKeyboardButton(
+            "➕ Добавить машину", callback_data="add_car"
+        )],
+        [InlineKeyboardButton(
+            "❓ Инструкция", callback_data="inst_cars"
+        )],
+        [InlineKeyboardButton(
+            "◀️ Назад", callback_data="finance_menu"
+        )],
     ]
     if not cars:
-        text = "🚗 *Машины*\n\nМашин пока нет. Добавьте первую!"
+        text = (
+            "🚗 *Машины*\n\n"
+            "Машин пока нет.\n\n"
+            "Нажми ➕ *Добавить машину* чтобы начать."
+        )
     else:
         text = f"🚗 *Машины* — всего: {len(cars)}\n\n"
         for car in cars[-10:]:
             text += (
                 f"*{car.get('ID', '—')}* — "
-                f"{car.get('Марка', '—')} {car.get('Модель', '—')} "
+                f"{car.get('Марка', '—')} "
+                f"{car.get('Модель', '—')} "
                 f"{car.get('Год', '—')}\n"
                 f"👤 {car.get('Клиент', '—')}\n\n"
             )
@@ -482,12 +806,16 @@ async def fin_cars(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# ===== ДОБАВИТЬ МАШИНУ — ДИАЛОГ =====
-async def add_car_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ===== ДОБАВИТЬ МАШИНУ =====
+async def add_car_start(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     context.user_data["new_car"] = {}
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_cars")]]
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_cars"
+    )]]
     await query.edit_message_text(
         "🚗 *Добавление машины*\n\n"
         "Шаг 1 из 8\n\n"
@@ -498,76 +826,127 @@ async def add_car_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ADD_CAR_MARK
 
-async def add_car_mark(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_car"]["Марка"] = update.message.text.strip()
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_cars")]]
+async def add_car_mark(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_car"]["Марка"] = (
+        update.message.text.strip()
+    )
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_cars"
+    )]]
     await update.message.reply_text(
-        "Шаг 2 из 8\n\nВведите *модель*:\n_Пример: 001, H6, Tiggo 8_",
+        "Шаг 2 из 8\n\nВведите *модель*:\n"
+        "_Пример: 001, H6, Tiggo 8_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return ADD_CAR_MODEL
 
-async def add_car_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_car"]["Модель"] = update.message.text.strip()
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_cars")]]
+async def add_car_model(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_car"]["Модель"] = (
+        update.message.text.strip()
+    )
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_cars"
+    )]]
     await update.message.reply_text(
-        "Шаг 3 из 8\n\nВведите *год выпуска*:\n_Пример: 2024_",
+        "Шаг 3 из 8\n\nВведите *год выпуска*:\n"
+        "_Пример: 2024_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return ADD_CAR_YEAR
 
-async def add_car_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_car"]["Год"] = update.message.text.strip()
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_cars")]]
+async def add_car_year(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_car"]["Год"] = (
+        update.message.text.strip()
+    )
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_cars"
+    )]]
     await update.message.reply_text(
-        "Шаг 4 из 8\n\nВведите *цвет*:\n_Пример: Белый, Чёрный_",
+        "Шаг 4 из 8\n\nВведите *цвет*:\n"
+        "_Пример: Белый, Чёрный_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return ADD_CAR_COLOR
 
-async def add_car_color(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_car"]["Цвет"] = update.message.text.strip()
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_cars")]]
+async def add_car_color(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_car"]["Цвет"] = (
+        update.message.text.strip()
+    )
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_cars"
+    )]]
     await update.message.reply_text(
-        "Шаг 5 из 8\n\nВведите *комплектацию*:\n_Пример: Максимум, Pro, Luxury_",
+        "Шаг 5 из 8\n\nВведите *комплектацию*:\n"
+        "_Пример: Максимум, Pro, Luxury_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return ADD_CAR_COMPLECT
 
-async def add_car_complect(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_car"]["Комплектация"] = update.message.text.strip()
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_cars")]]
+async def add_car_complect(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_car"]["Комплектация"] = (
+        update.message.text.strip()
+    )
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_cars"
+    )]]
     await update.message.reply_text(
-        "Шаг 6 из 8\n\nВведите *пробег* (км):\n_Пример: 0 или 15000_",
+        "Шаг 6 из 8\n\nВведите *пробег* (км):\n"
+        "_Пример: 0 или 15000_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return ADD_CAR_MILEAGE
 
-async def add_car_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_car"]["Пробег"] = update.message.text.strip()
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_cars")]]
+async def add_car_mileage(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_car"]["Пробег"] = (
+        update.message.text.strip()
+    )
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_cars"
+    )]]
     await update.message.reply_text(
         "Шаг 7 из 8\n\nВведите *имя клиента*:\n\n"
-        "Если физлицо — просто ФИО:\n_Пример: Иванов Иван Иванович_\n\n"
-        "Если юрлицо — название компании:\n_Пример: ООО Автомир_",
+        "Физлицо — ФИО:\n_Иванов Иван Иванович_\n\n"
+        "Юрлицо — название компании:\n_ООО Автомир_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return ADD_CAR_CLIENT
 
-async def add_car_client(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_car"]["Клиент_raw"] = update.message.text.strip()
+async def add_car_client(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_car"]["Клиент_raw"] = (
+        update.message.text.strip()
+    )
     kb = [
         [
-            InlineKeyboardButton("👤 Физлицо", callback_data="client_fiz"),
-            InlineKeyboardButton("🏢 Юрлицо", callback_data="client_yur")
+            InlineKeyboardButton(
+                "👤 Физлицо", callback_data="client_fiz"
+            ),
+            InlineKeyboardButton(
+                "🏢 Юрлицо", callback_data="client_yur"
+            )
         ],
-        [InlineKeyboardButton("❌ Отмена", callback_data="fin_cars")]
+        [InlineKeyboardButton(
+            "❌ Отмена", callback_data="fin_cars"
+        )]
     ]
     await update.message.reply_text(
         "Шаг 8 из 8\n\nТип клиента:",
@@ -576,7 +955,9 @@ async def add_car_client(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ADD_CAR_CLIENT_TYPE
 
-async def add_car_client_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_car_client_type(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     client_raw = context.user_data["new_car"].pop("Клиент_raw")
@@ -591,7 +972,6 @@ async def add_car_client_type(update: Update, context: ContextTypes.DEFAULT_TYPE
     car["Клиент"] = client_str
     car["Тип клиента"] = client_type
 
-    # Сохраняем в таблицу
     try:
         ws = get_worksheet("МАШИНЫ")
         car_id = get_next_id("МАШИНЫ", "AUTO", 0)
@@ -609,20 +989,26 @@ async def add_car_client_type(update: Update, context: ContextTypes.DEFAULT_TYPE
             today
         ]
         ws.append_row(row)
-        kb = [[InlineKeyboardButton("◀️ К машинам", callback_data="fin_cars")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ К машинам", callback_data="fin_cars"
+        )]]
         await query.edit_message_text(
             f"✅ *Машина добавлена!*\n\n"
             f"🆔 {car_id}\n"
-            f"🚗 {car.get('Марка')} {car.get('Модель')} {car.get('Год')}\n"
+            f"🚗 {car.get('Марка')} {car.get('Модель')} "
+            f"{car.get('Год')}\n"
             f"🎨 {car.get('Цвет')} | {car.get('Комплектация')}\n"
             f"📍 Пробег: {car.get('Пробег')} км\n"
-            f"👤 {car.get('Клиент')}",
+            f"👤 {car.get('Клиент')}\n\n"
+            f"Теперь можешь добавить платежи по этой машине.",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"add_car error: {e}")
-        kb = [[InlineKeyboardButton("◀️ Назад", callback_data="fin_cars")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ Назад", callback_data="fin_cars"
+        )]]
         await query.edit_message_text(
             "❌ Ошибка при сохранении. Попробуйте ещё раз.",
             reply_markup=InlineKeyboardMarkup(kb)
@@ -630,47 +1016,75 @@ async def add_car_client_type(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data.pop("new_car", None)
     return ConversationHandler.END
 
-# ===== ДОБАВИТЬ ПЛАТЁЖ =====
+# ===== КАТЕГОРИИ ПЛАТЕЖЕЙ =====
 CATEGORIES = [
-    ("💰 Накрутка (доход)", "Накрутка", "CNY", "Входящий"),
-    ("💵 Допы от клиента (доход)", "Допы от клиента", "RUB", "Входящий"),
-    ("🚛 Автовоз", "Автовоз", "RUB", "Исходящий"),
-    ("🏛 Таможенный брокер", "Таможенный брокер", "RUB", "Исходящий"),
-    ("🔧 Допы в Китае", "Допы в Китае", "CNY", "Исходящий"),
-    ("⛽ Бензин", "Бензин", "RUB", "Исходящий"),
-    ("💸 Кэшбэк юрику", "Кэшбэк юрику", "CNY", "Исходящий"),
-    ("👤 % Менеджеру (20 000₽)", "% Менеджеру", "RUB", "Исходящий"),
+    ("💰 Накрутка — моя прибыль (юани)",
+     "Накрутка", "CNY", "Входящий"),
+    ("💵 Допы от клиента (рубли)",
+     "Допы от клиента", "RUB", "Входящий"),
+    ("🚛 Автовоз (рубли)",
+     "Автовоз", "RUB", "Исходящий"),
+    ("🏛 Таможенный брокер (рубли)",
+     "Таможенный брокер", "RUB", "Исходящий"),
+    ("🔧 Допы в Китае (юани)",
+     "Допы в Китае", "CNY", "Исходящий"),
+    ("⛽ Бензин (рубли)",
+     "Бензин", "RUB", "Исходящий"),
+    ("💸 Кэшбэк юрику (юани)",
+     "Кэшбэк юрику", "CNY", "Исходящий"),
+    ("👤 % Менеджеру 20 000₽ (фикс)",
+     "% Менеджеру", "RUB", "Исходящий"),
 ]
 
-async def fin_pay_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ===== ДОБАВИТЬ ПЛАТЁЖ =====
+async def fin_pay_start(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     cars = get_all_cars()
     if not cars:
-        kb = [[InlineKeyboardButton("◀️ Назад", callback_data="finance_menu")]]
+        kb = [
+            [InlineKeyboardButton(
+                "🚗 Добавить машину", callback_data="add_car"
+            )],
+            [InlineKeyboardButton(
+                "◀️ Назад", callback_data="finance_menu"
+            )],
+        ]
         await query.edit_message_text(
-            "❌ Сначала добавьте машину!",
-            reply_markup=InlineKeyboardMarkup(kb)
+            "❌ *Сначала добавьте машину!*\n\n"
+            "Платёж можно записать только к конкретной машине.",
+            reply_markup=InlineKeyboardMarkup(kb),
+            parse_mode="Markdown"
         )
         return ConversationHandler.END
 
     context.user_data["new_pay"] = {}
-    # Кнопки машин (последние 10)
     car_buttons = []
     for car in cars[-10:]:
-        label = f"{car['ID']} — {car['Марка']} {car['Модель']}"
-        car_buttons.append(
-            [InlineKeyboardButton(label, callback_data=f"paycar_{car['ID']}")]
+        label = (
+            f"{car['ID']} — "
+            f"{car['Марка']} {car['Модель']}"
         )
-    car_buttons.append([InlineKeyboardButton("◀️ Отмена", callback_data="finance_menu")])
+        car_buttons.append([InlineKeyboardButton(
+            label, callback_data=f"paycar_{car['ID']}"
+        )])
+    car_buttons.append([InlineKeyboardButton(
+        "◀️ Отмена", callback_data="finance_menu"
+    )])
     await query.edit_message_text(
-        "➕ *Добавить платёж*\n\nШаг 1 из 3\n\nВыберите машину:",
+        "➕ *Добавить платёж*\n\n"
+        "Шаг 1 из 3\n\n"
+        "Выберите машину к которой относится платёж:",
         reply_markup=InlineKeyboardMarkup(car_buttons),
         parse_mode="Markdown"
     )
     return PAY_CAR
 
-async def pay_car_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def pay_car_selected(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     car_id = query.data.replace("paycar_", "")
@@ -678,18 +1092,24 @@ async def pay_car_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cat_buttons = []
     for i, (label, _, _, _) in enumerate(CATEGORIES):
-        cat_buttons.append(
-            [InlineKeyboardButton(label, callback_data=f"paycat_{i}")]
-        )
-    cat_buttons.append([InlineKeyboardButton("◀️ Отмена", callback_data="finance_menu")])
+        cat_buttons.append([InlineKeyboardButton(
+            label, callback_data=f"paycat_{i}"
+        )])
+    cat_buttons.append([InlineKeyboardButton(
+        "◀️ Отмена", callback_data="finance_menu"
+    )])
     await query.edit_message_text(
-        f"Машина: *{car_id}*\n\nШаг 2 из 3\n\nВыберите категорию:",
+        f"Машина: *{car_id}*\n\n"
+        f"Шаг 2 из 3\n\n"
+        f"Выберите категорию платежа:",
         reply_markup=InlineKeyboardMarkup(cat_buttons),
         parse_mode="Markdown"
     )
     return PAY_CATEGORY
 
-async def pay_category_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def pay_category_selected(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     idx = int(query.data.replace("paycat_", ""))
@@ -698,40 +1118,53 @@ async def pay_category_selected(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["new_pay"]["currency"] = currency
     context.user_data["new_pay"]["type"] = pay_type
 
-    # Для % Менеджеру сумма фиксирована
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="finance_menu"
+    )]]
+
     if cat_name == "% Менеджеру":
         context.user_data["new_pay"]["amount"] = "20000"
-        kb = [[InlineKeyboardButton("❌ Отмена", callback_data="finance_menu")]]
         await query.edit_message_text(
             f"Категория: *{cat_name}*\n"
             f"Сумма: *20 000 ₽* (фиксированная)\n\n"
-            f"Шаг 3 из 3\n\nДобавить комментарий? (или напишите «-» чтобы пропустить)",
+            f"Шаг 3 из 3\n\n"
+            f"Добавить комментарий?\n"
+            f"_(напишите текст или «-» чтобы пропустить)_",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
     else:
-        kb = [[InlineKeyboardButton("❌ Отмена", callback_data="finance_menu")]]
+        currency_label = "юанях (¥)" if currency == "CNY" else "рублях (₽)"
         await query.edit_message_text(
-            f"Категория: *{cat_name}* | Валюта: *{currency}*\n\n"
-            f"Шаг 3 из 3\n\nВведите *сумму*:",
+            f"Категория: *{cat_name}*\n\n"
+            f"Шаг 3 из 3\n\n"
+            f"Введите сумму в {currency_label}:\n"
+            f"_Только цифры, например: 2800_",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
     return PAY_AMOUNT
 
-async def pay_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def pay_amount(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     text = update.message.text.strip()
     if context.user_data["new_pay"].get("amount") != "20000":
         context.user_data["new_pay"]["amount"] = text
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="finance_menu")]]
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="finance_menu"
+    )]]
     await update.message.reply_text(
-        "Добавить комментарий?\n_(или напишите «-» чтобы пропустить)_",
+        "Добавить комментарий?\n"
+        "_(напишите текст или «-» чтобы пропустить)_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return PAY_COMMENT
 
-async def pay_comment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def pay_comment(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     comment = update.message.text.strip()
     if comment == "-":
         comment = ""
@@ -753,60 +1186,96 @@ async def pay_comment(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pay.get("comment", "")
         ]
         ws.append_row(row)
-        currency_sign = "¥" if pay.get("currency") == "CNY" else "₽"
+        currency_sign = (
+            "¥" if pay.get("currency") == "CNY" else "₽"
+        )
+        type_icon = (
+            "📥" if pay.get("type") == "Входящий" else "📤"
+        )
         kb = [
-            [InlineKeyboardButton("➕ Ещё платёж", callback_data="fin_pay")],
-            [InlineKeyboardButton("◀️ В финансы", callback_data="finance_menu")],
+            [InlineKeyboardButton(
+                "➕ Ещё платёж", callback_data="fin_pay"
+            )],
+            [InlineKeyboardButton(
+                "◀️ В финансы", callback_data="finance_menu"
+            )],
         ]
         await update.message.reply_text(
             f"✅ *Платёж записан!*\n\n"
             f"🆔 {pay_id}\n"
-            f"🚗 Машина: {pay.get('car_id')}\n"
+            f"🚗 Машина: *{pay.get('car_id')}*\n"
             f"📂 {pay.get('category')}\n"
-            f"💵 {pay.get('amount')} {currency_sign}\n"
-            f"{'📥' if pay.get('type') == 'Входящий' else '📤'} {pay.get('type')}",
+            f"💵 *{pay.get('amount')} {currency_sign}*\n"
+            f"{type_icon} {pay.get('type')}",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"pay_comment error: {e}")
-        await update.message.reply_text("❌ Ошибка при сохранении.")
-
+        await update.message.reply_text(
+            "❌ Ошибка при сохранении."
+        )
     context.user_data.pop("new_pay", None)
     return ConversationHandler.END
 
-# ===== ДОЛГИ =====
+# ===== ТИПЫ ДОЛГОВ =====
 DEBT_TYPES = [
-    ("👤 Клиент должен нам за допы", "Клиент", "Нам", "RUB"),
-    ("🏢 Мы должны клиенту (переплата)", "Мы", "Клиенту", "RUB"),
-    ("🇨🇳 Мы должны поставщику за допы", "Мы", "Поставщику", "CNY"),
-    ("💸 Мы должны юрику кэшбэк", "Мы", "Юрику", "CNY"),
-    ("👤 Мы должны менеджеру %", "Мы", "Менеджеру", "RUB"),
-    ("🏛 Мы должны брокеру", "Мы", "Брокеру", "RUB"),
-    ("🚛 Мы должны автовозу", "Мы", "Автовозу", "RUB"),
+    ("👤 Клиент должен нам за допы",
+     "Клиент", "Нам", "RUB"),
+    ("🏢 Мы должны клиенту (переплата)",
+     "Мы", "Клиенту", "RUB"),
+    ("🇨🇳 Мы должны поставщику за допы",
+     "Мы", "Поставщику", "CNY"),
+    ("💸 Мы должны юрику кэшбэк",
+     "Мы", "Юрику", "CNY"),
+    ("👤 Мы должны менеджеру %",
+     "Мы", "Менеджеру", "RUB"),
+    ("🏛 Мы должны брокеру",
+     "Мы", "Брокеру", "RUB"),
+    ("🚛 Мы должны автовозу",
+     "Мы", "Автовозу", "RUB"),
 ]
 
-async def fin_debts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ===== ДОЛГИ =====
+async def fin_debts(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     try:
         ws = get_worksheet("ДОЛГИ")
         records = ws.get_all_records()
-        unpaid = [r for r in records if r.get("Статус") == "Не оплачен"]
+        unpaid = [
+            r for r in records
+            if r.get("Статус") == "Не оплачен"
+        ]
         kb = [
-            [InlineKeyboardButton("➕ Добавить долг", callback_data="add_debt")],
-            [InlineKeyboardButton("✅ Закрыть долг", callback_data="close_debt")],
-            [InlineKeyboardButton("◀️ Назад", callback_data="finance_menu")],
+            [InlineKeyboardButton(
+                "➕ Добавить долг", callback_data="add_debt"
+            )],
+            [InlineKeyboardButton(
+                "✅ Закрыть долг", callback_data="close_debt"
+            )],
+            [InlineKeyboardButton(
+                "❓ Инструкция", callback_data="inst_debts"
+            )],
+            [InlineKeyboardButton(
+                "◀️ Назад", callback_data="finance_menu"
+            )],
         ]
         if not unpaid:
             text = "⚖️ *Долги*\n\n✅ Все долги погашены!"
         else:
             text = f"⚖️ *Долги* — открытых: {len(unpaid)}\n\n"
             for d in unpaid[-8:]:
-                currency_sign = "¥" if d.get("Валюта") == "CNY" else "₽"
+                currency_sign = (
+                    "¥" if d.get("Валюта") == "CNY" else "₽"
+                )
                 text += (
-                    f"*{d.get('ID долга')}* | {d.get('ID машины')}\n"
-                    f"{d.get('Кто должен')} → {d.get('Кому должен')}: "
+                    f"*{d.get('ID долга')}* | "
+                    f"{d.get('ID машины')}\n"
+                    f"{d.get('Кто должен')} → "
+                    f"{d.get('Кому должен')}: "
                     f"*{d.get('Сумма')} {currency_sign}*\n\n"
                 )
         await query.edit_message_text(
@@ -817,12 +1286,16 @@ async def fin_debts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"fin_debts error: {e}")
 
-async def add_debt_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_debt_start(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     cars = get_all_cars()
     if not cars:
-        kb = [[InlineKeyboardButton("◀️ Назад", callback_data="fin_debts")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ Назад", callback_data="fin_debts"
+        )]]
         await query.edit_message_text(
             "❌ Сначала добавьте машину!",
             reply_markup=InlineKeyboardMarkup(kb)
@@ -832,11 +1305,16 @@ async def add_debt_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_debt"] = {}
     car_buttons = []
     for car in cars[-10:]:
-        label = f"{car['ID']} — {car['Марка']} {car['Модель']}"
-        car_buttons.append(
-            [InlineKeyboardButton(label, callback_data=f"debtcar_{car['ID']}")]
+        label = (
+            f"{car['ID']} — "
+            f"{car['Марка']} {car['Модель']}"
         )
-    car_buttons.append([InlineKeyboardButton("◀️ Отмена", callback_data="fin_debts")])
+        car_buttons.append([InlineKeyboardButton(
+            label, callback_data=f"debtcar_{car['ID']}"
+        )])
+    car_buttons.append([InlineKeyboardButton(
+        "◀️ Отмена", callback_data="fin_debts"
+    )])
     await query.edit_message_text(
         "⚖️ *Добавить долг*\n\nВыберите машину:",
         reply_markup=InlineKeyboardMarkup(car_buttons),
@@ -844,7 +1322,9 @@ async def add_debt_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return DEBT_CAR
 
-async def debt_car_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def debt_car_selected(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     car_id = query.data.replace("debtcar_", "")
@@ -852,10 +1332,12 @@ async def debt_car_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     debt_buttons = []
     for i, (label, _, _, _) in enumerate(DEBT_TYPES):
-        debt_buttons.append(
-            [InlineKeyboardButton(label, callback_data=f"debttype_{i}")]
-        )
-    debt_buttons.append([InlineKeyboardButton("◀️ Отмена", callback_data="fin_debts")])
+        debt_buttons.append([InlineKeyboardButton(
+            label, callback_data=f"debttype_{i}"
+        )])
+    debt_buttons.append([InlineKeyboardButton(
+        "◀️ Отмена", callback_data="fin_debts"
+    )])
     await query.edit_message_text(
         f"Машина: *{car_id}*\n\nТип долга:",
         reply_markup=InlineKeyboardMarkup(debt_buttons),
@@ -863,7 +1345,9 @@ async def debt_car_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return DEBT_WHO
 
-async def debt_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def debt_type_selected(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     idx = int(query.data.replace("debttype_", ""))
@@ -872,17 +1356,27 @@ async def debt_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["new_debt"]["whom"] = whom
     context.user_data["new_debt"]["currency"] = currency
 
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_debts")]]
-    currency_sign = "¥ (юани)" if currency == "CNY" else "₽ (рубли)"
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_debts"
+    )]]
+    currency_label = (
+        "юанях (¥)" if currency == "CNY" else "рублях (₽)"
+    )
     await query.edit_message_text(
-        f"*{label}*\n\nВалюта: *{currency_sign}*\n\nВведите сумму:",
+        f"*{label}*\n\n"
+        f"Введите сумму в {currency_label}:\n"
+        f"_Только цифры, например: 5000_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return DEBT_AMOUNT
 
-async def debt_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_debt"]["amount"] = update.message.text.strip()
+async def debt_amount(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_debt"]["amount"] = (
+        update.message.text.strip()
+    )
     try:
         debt = context.user_data["new_debt"]
         ws = get_worksheet("ДОЛГИ")
@@ -899,10 +1393,16 @@ async def debt_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
             today
         ]
         ws.append_row(row)
-        currency_sign = "¥" if debt.get("currency") == "CNY" else "₽"
+        currency_sign = (
+            "¥" if debt.get("currency") == "CNY" else "₽"
+        )
         kb = [
-            [InlineKeyboardButton("➕ Ещё долг", callback_data="add_debt")],
-            [InlineKeyboardButton("◀️ К долгам", callback_data="fin_debts")],
+            [InlineKeyboardButton(
+                "➕ Ещё долг", callback_data="add_debt"
+            )],
+            [InlineKeyboardButton(
+                "◀️ К долгам", callback_data="fin_debts"
+            )],
         ]
         await update.message.reply_text(
             f"✅ *Долг записан!*\n\n"
@@ -910,26 +1410,36 @@ async def debt_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🚗 {debt.get('car_id')}\n"
             f"{debt.get('who')} → {debt.get('whom')}: "
             f"*{debt.get('amount')} {currency_sign}*\n"
-            f"📌 Статус: Не оплачен",
+            f"📌 Статус: ❌ Не оплачен\n\n"
+            f"Когда долг будет погашен — нажми "
+            f"✅ *Закрыть долг* в разделе Долги.",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"debt_amount error: {e}")
-        await update.message.reply_text("❌ Ошибка при сохранении.")
-
+        await update.message.reply_text(
+            "❌ Ошибка при сохранении."
+        )
     context.user_data.pop("new_debt", None)
     return ConversationHandler.END
 
-async def close_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def close_debt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     try:
         ws = get_worksheet("ДОЛГИ")
         records = ws.get_all_records()
-        unpaid = [r for r in records if r.get("Статус") == "Не оплачен"]
+        unpaid = [
+            r for r in records
+            if r.get("Статус") == "Не оплачен"
+        ]
         if not unpaid:
-            kb = [[InlineKeyboardButton("◀️ Назад", callback_data="fin_debts")]]
+            kb = [[InlineKeyboardButton(
+                "◀️ Назад", callback_data="fin_debts"
+            )]]
             await query.edit_message_text(
                 "✅ Все долги уже погашены!",
                 reply_markup=InlineKeyboardMarkup(kb)
@@ -938,24 +1448,33 @@ async def close_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         debt_buttons = []
         for d in unpaid[-10:]:
-            currency_sign = "¥" if d.get("Валюта") == "CNY" else "₽"
+            currency_sign = (
+                "¥" if d.get("Валюта") == "CNY" else "₽"
+            )
             label = (
-                f"{d.get('ID долга')} | {d.get('ID машины')} | "
+                f"{d.get('ID долга')} | "
+                f"{d.get('ID машины')} | "
                 f"{d.get('Сумма')} {currency_sign}"
             )
-            debt_buttons.append(
-                [InlineKeyboardButton(label, callback_data=f"closedebt_{d.get('ID долга')}")]
-            )
-        debt_buttons.append([InlineKeyboardButton("◀️ Отмена", callback_data="fin_debts")])
+            debt_buttons.append([InlineKeyboardButton(
+                label,
+                callback_data=f"closedebt_{d.get('ID долга')}"
+            )])
+        debt_buttons.append([InlineKeyboardButton(
+            "◀️ Отмена", callback_data="fin_debts"
+        )])
         await query.edit_message_text(
-            "✅ *Закрыть долг*\n\nВыберите долг который погашен:",
+            "✅ *Закрыть долг*\n\n"
+            "Выберите долг который был погашен:",
             reply_markup=InlineKeyboardMarkup(debt_buttons),
             parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"close_debt error: {e}")
 
-async def close_debt_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def close_debt_confirm(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     debt_id = query.data.replace("closedebt_", "")
@@ -966,9 +1485,13 @@ async def close_debt_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if r.get("ID долга") == debt_id:
                 ws.update_cell(i + 2, 7, "Оплачен")
                 break
-        kb = [[InlineKeyboardButton("◀️ К долгам", callback_data="fin_debts")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ К долгам", callback_data="fin_debts"
+        )]]
         await query.edit_message_text(
-            f"✅ *Долг {debt_id} закрыт!*",
+            f"✅ *Долг {debt_id} закрыт!*\n\n"
+            f"Не забудь записать платёж в разделе "
+            f"➕ *Добавить платёж*.",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
@@ -976,81 +1499,140 @@ async def close_debt_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"close_debt_confirm error: {e}")
 
 # ===== ЗАРПЛАТЫ =====
-async def fin_sal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def fin_sal(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     try:
         ws = get_worksheet("ЗАРПЛАТЫ")
         records = ws.get_all_records()
-        unpaid = [r for r in records if r.get("Статус") == "Не выплачено"]
+        unpaid = [
+            r for r in records
+            if r.get("Статус") == "Не выплачено"
+        ]
         kb = [
-            [InlineKeyboardButton("➕ Добавить зарплату", callback_data="add_sal")],
-            [InlineKeyboardButton("✅ Отметить выплату", callback_data="pay_sal")],
-            [InlineKeyboardButton("◀️ Назад", callback_data="finance_menu")],
+            [InlineKeyboardButton(
+                "➕ Добавить зарплату",
+                callback_data="add_sal"
+            )],
+            [InlineKeyboardButton(
+                "✅ Отметить выплату",
+                callback_data="pay_sal"
+            )],
+            [InlineKeyboardButton(
+                "❓ Инструкция",
+                callback_data="inst_sal"
+            )],
+            [InlineKeyboardButton(
+                "◀️ Назад",
+                callback_data="finance_menu"
+            )],
         ]
         if not records:
-            text = "👥 *Зарплаты*\n\nЗаписей пока нет."
+            text = (
+                "👥 *Зарплаты*\n\n"
+                "Записей пока нет.\n\n"
+                "Нажми ➕ *Добавить зарплату* чтобы начать."
+            )
         else:
-            text = f"👥 *Зарплаты*\n\nНе выплачено: {len(unpaid)}\n\n"
+            text = (
+                f"👥 *Зарплаты*\n\n"
+                f"❌ Не выплачено: {len(unpaid)}\n\n"
+            )
             for r in records[-8:]:
-                status_icon = "❌" if r.get("Статус") == "Не выплачено" else "✅"
+                status_icon = (
+                    "❌" if r.get("Статус") == "Не выплачено"
+                    else "✅"
+                )
                 text += (
-                    f"{status_icon} *{r.get('Сотрудник')}* — {r.get('Месяц')}\n"
+                    f"{status_icon} *{r.get('Сотрудник')}* "
+                    f"— {r.get('Месяц')}\n"
                     f"Оклад: {r.get('Оклад')} ₽ | "
                     f"Бонус: {r.get('Бонус')} ₽ | "
                     f"Итого: *{r.get('Итого')} ₽*\n\n"
                 )
         await query.edit_message_text(
             text,
-            reply_markup=InlineKeyboardMarkrap(kb),
+            reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"fin_sal error: {e}")
 
-async def add_sal_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_sal_start(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     context.user_data["new_sal"] = {}
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_sal")]]
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_sal"
+    )]]
     await query.edit_message_text(
-        "👥 *Добавить зарплату*\n\nШаг 1 из 4\n\nВведите *имя сотрудника*:",
+        "👥 *Добавить зарплату*\n\n"
+        "Шаг 1 из 4\n\n"
+        "Введите *имя сотрудника*:\n"
+        "_Пример: Иванов Кирилл_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return SAL_NAME
 
-async def sal_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_sal"]["name"] = update.message.text.strip()
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_sal")]]
+async def sal_name(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_sal"]["name"] = (
+        update.message.text.strip()
+    )
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_sal"
+    )]]
     await update.message.reply_text(
-        "Шаг 2 из 4\n\nВведите *оклад* (₽):",
+        "Шаг 2 из 4\n\nВведите *оклад* (₽):\n"
+        "_Только цифры: 30000_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return SAL_OKLAD
 
-async def sal_oklad(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_sal"]["oklad"] = update.message.text.strip()
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_sal")]]
+async def sal_oklad(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_sal"]["oklad"] = (
+        update.message.text.strip()
+    )
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_sal"
+    )]]
     await update.message.reply_text(
-        "Шаг 3 из 4\n\nВведите *бонус* (₽):\n_(если нет бонуса — напишите 0)_",
+        "Шаг 3 из 4\n\nВведите *бонус* (₽):\n"
+        "_Если нет бонуса — напишите 0_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return SAL_BONUS
 
-async def sal_bonus(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_sal"]["bonus"] = update.message.text.strip()
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="fin_sal")]]
+async def sal_bonus(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    context.user_data["new_sal"]["bonus"] = (
+        update.message.text.strip()
+    )
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="fin_sal"
+    )]]
     await update.message.reply_text(
-        "Шаг 4 из 4\n\nВведите *месяц*:\n_Пример: 07.2026_",
+        "Шаг 4 из 4\n\nВведите *месяц*:\n"
+        "_Пример: 07.2026_",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
     return SAL_MONTH
 
-async def sal_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def sal_month(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     sal = context.user_data["new_sal"]
     sal["month"] = update.message.text.strip()
     try:
@@ -1071,8 +1653,12 @@ async def sal_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         ws.append_row(row)
         kb = [
-            [InlineKeyboardButton("➕ Ещё", callback_data="add_sal")],
-            [InlineKeyboardButton("◀️ К зарплатам", callback_data="fin_sal")],
+            [InlineKeyboardButton(
+                "➕ Ещё", callback_data="add_sal"
+            )],
+            [InlineKeyboardButton(
+                "◀️ К зарплатам", callback_data="fin_sal"
+            )],
         ]
         await update.message.reply_text(
             f"✅ *Зарплата добавлена!*\n\n"
@@ -1081,25 +1667,36 @@ async def sal_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Оклад: {oklad:,.0f} ₽\n"
             f"Бонус: {bonus:,.0f} ₽\n"
             f"Итого: *{total:,.0f} ₽*\n"
-            f"📌 Статус: Не выплачено",
+            f"📌 Статус: ❌ Не выплачено\n\n"
+            f"Когда выплатишь — нажми "
+            f"✅ *Отметить выплату*.",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"sal_month error: {e}")
-        await update.message.reply_text("❌ Ошибка при сохранении.")
+        await update.message.reply_text(
+            "❌ Ошибка при сохранении."
+        )
     context.user_data.pop("new_sal", None)
     return ConversationHandler.END
 
-async def pay_sal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def pay_sal(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     try:
         ws = get_worksheet("ЗАРПЛАТЫ")
         records = ws.get_all_records()
-        unpaid = [r for r in records if r.get("Статус") == "Не выплачено"]
+        unpaid = [
+            r for r in records
+            if r.get("Статус") == "Не выплачено"
+        ]
         if not unpaid:
-            kb = [[InlineKeyboardButton("◀️ Назад", callback_data="fin_sal")]]
+            kb = [[InlineKeyboardButton(
+                "◀️ Назад", callback_data="fin_sal"
+            )]]
             await query.edit_message_text(
                 "✅ Все зарплаты выплачены!",
                 reply_markup=InlineKeyboardMarkup(kb)
@@ -1108,20 +1705,30 @@ async def pay_sal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         sal_buttons = []
         for r in unpaid:
-            label = f"{r.get('Сотрудник')} | {r.get('Месяц')} | {r.get('Итого')} ₽"
-            sal_buttons.append(
-                [InlineKeyboardButton(label, callback_data=f"paysal_{r.get('ID')}")]
+            label = (
+                f"{r.get('Сотрудник')} | "
+                f"{r.get('Месяц')} | "
+                f"{r.get('Итого')} ₽"
             )
-        sal_buttons.append([InlineKeyboardButton("◀️ Отмена", callback_data="fin_sal")])
+            sal_buttons.append([InlineKeyboardButton(
+                label,
+                callback_data=f"paysal_{r.get('ID')}"
+            )])
+        sal_buttons.append([InlineKeyboardButton(
+            "◀️ Отмена", callback_data="fin_sal"
+        )])
         await query.edit_message_text(
-            "✅ *Отметить выплату*\n\nВыберите сотрудника:",
+            "✅ *Отметить выплату*\n\n"
+            "Выберите сотрудника которому выплатили:",
             reply_markup=InlineKeyboardMarkup(sal_buttons),
             parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"pay_sal error: {e}")
 
-async def pay_sal_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def pay_sal_confirm(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     sal_id = query.data.replace("paysal_", "")
@@ -1134,9 +1741,12 @@ async def pay_sal_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ws.update_cell(i + 2, 7, "Выплачено")
                 ws.update_cell(i + 2, 8, today)
                 break
-        kb = [[InlineKeyboardButton("◀️ К зарплатам", callback_data="fin_sal")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ К зарплатам", callback_data="fin_sal"
+        )]]
         await query.edit_message_text(
-            f"✅ *Зарплата выплачена!*",
+            f"✅ *Зарплата выплачена!*\n\n"
+            f"Дата выплаты зафиксирована.",
             reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="Markdown"
         )
@@ -1144,17 +1754,36 @@ async def pay_sal_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"pay_sal_confirm error: {e}")
 
 # ===== ОТЧЁТЫ =====
-async def fin_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def fin_reports(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     kb = [
-        [InlineKeyboardButton("📅 За день", callback_data="report_day")],
-        [InlineKeyboardButton("📅 За неделю", callback_data="report_week")],
-        [InlineKeyboardButton("📅 За месяц", callback_data="report_month")],
-        [InlineKeyboardButton("🚗 По машине", callback_data="report_car")],
-        [InlineKeyboardButton("📈 P&L", callback_data="report_pl")],
-        [InlineKeyboardButton("⚖️ Все долги", callback_data="report_debts")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="finance_menu")],
+        [InlineKeyboardButton(
+            "📅 За день", callback_data="report_day"
+        )],
+        [InlineKeyboardButton(
+            "📅 За неделю", callback_data="report_week"
+        )],
+        [InlineKeyboardButton(
+            "📅 За месяц", callback_data="report_month"
+        )],
+        [InlineKeyboardButton(
+            "🚗 По машине", callback_data="report_car"
+        )],
+        [InlineKeyboardButton(
+            "📈 P&L", callback_data="report_pl"
+        )],
+        [InlineKeyboardButton(
+            "⚖️ Все долги", callback_data="report_debts"
+        )],
+        [InlineKeyboardButton(
+            "❓ Инструкция", callback_data="inst_reports"
+        )],
+        [InlineKeyboardButton(
+            "◀️ Назад", callback_data="finance_menu"
+        )],
     ]
     await query.edit_message_text(
         "📊 *Отчёты*\n\nВыберите тип отчёта:",
@@ -1164,26 +1793,26 @@ async def fin_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def build_period_report(records, label):
     if not records:
-        return f"📊 *{label}*\n\nДанных нет."
+        return f"📊 *{label}*\n\nДанных за этот период нет."
     income_rub = sum(
-        float(r.get("Сумма", 0))
-        for r in records
-        if r.get("Тип") == "Входящий" and r.get("Валюта") == "RUB"
+        float(r.get("Сумма", 0)) for r in records
+        if r.get("Тип") == "Входящий"
+        and r.get("Валюта") == "RUB"
     )
     income_cny = sum(
-        float(r.get("Сумма", 0))
-        for r in records
-        if r.get("Тип") == "Входящий" and r.get("Валюта") == "CNY"
+        float(r.get("Сумма", 0)) for r in records
+        if r.get("Тип") == "Входящий"
+        and r.get("Валюта") == "CNY"
     )
     expense_rub = sum(
-        float(r.get("Сумма", 0))
-        for r in records
-        if r.get("Тип") == "Исходящий" and r.get("Валюта") == "RUB"
+        float(r.get("Сумма", 0)) for r in records
+        if r.get("Тип") == "Исходящий"
+        and r.get("Валюта") == "RUB"
     )
     expense_cny = sum(
-        float(r.get("Сумма", 0))
-        for r in records
-        if r.get("Тип") == "Исходящий" and r.get("Валюта") == "CNY"
+        float(r.get("Сумма", 0)) for r in records
+        if r.get("Тип") == "Исходящий"
+        and r.get("Валюта") == "CNY"
     )
     text = f"📊 *{label}*\n\n"
     text += f"📥 *Доходы:*\n"
@@ -1192,21 +1821,29 @@ def build_period_report(records, label):
     text += f"📤 *Расходы:*\n"
     text += f"   Рубли: *{expense_rub:,.0f} ₽*\n"
     text += f"   Юани: *{expense_cny:,.0f} ¥*\n\n"
-    text += f"💵 *Итого (рубли): {income_rub - expense_rub:,.0f} ₽*\n"
-    text += f"💴 *Итого (юани): {income_cny - expense_cny:,.0f} ¥*\n"
+    text += f"💵 *Итого рубли: {income_rub - expense_rub:,.0f} ₽*\n"
+    text += f"💴 *Итого юани: {income_cny - expense_cny:,.0f} ¥*\n"
     text += f"\n📋 Операций: {len(records)}"
     return text
 
-async def report_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def report_day(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     try:
         ws = get_worksheet("ПЛАТЕЖИ")
         records = ws.get_all_records()
         today = datetime.now().strftime("%d.%m.%Y")
-        filtered = [r for r in records if r.get("Дата") == today]
-        text = build_period_report(filtered, f"Отчёт за {today}")
-        kb = [[InlineKeyboardButton("◀️ К отчётам", callback_data="fin_reports")]]
+        filtered = [
+            r for r in records if r.get("Дата") == today
+        ]
+        text = build_period_report(
+            filtered, f"Отчёт за {today}"
+        )
+        kb = [[InlineKeyboardButton(
+            "◀️ К отчётам", callback_data="fin_reports"
+        )]]
         await query.edit_message_text(
             text,
             reply_markup=InlineKeyboardMarkup(kb),
@@ -1215,7 +1852,9 @@ async def report_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"report_day error: {e}")
 
-async def report_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def report_week(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     try:
@@ -1225,13 +1864,17 @@ async def report_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filtered = []
         for r in records:
             try:
-                d = datetime.strptime(r.get("Дата", ""), "%d.%m.%Y").date()
+                d = datetime.strptime(
+                    r.get("Дата", ""), "%d.%m.%Y"
+                ).date()
                 if (today - d).days <= 7:
                     filtered.append(r)
             except:
                 pass
         text = build_period_report(filtered, "Отчёт за неделю")
-        kb = [[InlineKeyboardButton("◀️ К отчётам", callback_data="fin_reports")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ К отчётам", callback_data="fin_reports"
+        )]]
         await query.edit_message_text(
             text,
             reply_markup=InlineKeyboardMarkup(kb),
@@ -1240,7 +1883,9 @@ async def report_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"report_week error: {e}")
 
-async def report_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def report_month(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     try:
@@ -1250,14 +1895,20 @@ async def report_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filtered = []
         for r in records:
             try:
-                d = datetime.strptime(r.get("Дата", ""), "%d.%m.%Y")
+                d = datetime.strptime(
+                    r.get("Дата", ""), "%d.%m.%Y"
+                )
                 if d.month == now.month and d.year == now.year:
                     filtered.append(r)
             except:
                 pass
         month_name = now.strftime("%m.%Y")
-        text = build_period_report(filtered, f"Отчёт за {month_name}")
-        kb = [[InlineKeyboardButton("◀️ К отчётам", callback_data="fin_reports")]]
+        text = build_period_report(
+            filtered, f"Отчёт за {month_name}"
+        )
+        kb = [[InlineKeyboardButton(
+            "◀️ К отчётам", callback_data="fin_reports"
+        )]]
         await query.edit_message_text(
             text,
             reply_markup=InlineKeyboardMarkup(kb),
@@ -1266,12 +1917,16 @@ async def report_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"report_month error: {e}")
 
-async def report_car_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def report_car_start(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     cars = get_all_cars()
     if not cars:
-        kb = [[InlineKeyboardButton("◀️ Назад", callback_data="fin_reports")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ Назад", callback_data="fin_reports"
+        )]]
         await query.edit_message_text(
             "❌ Машин нет.",
             reply_markup=InlineKeyboardMarkup(kb)
@@ -1280,11 +1935,16 @@ async def report_car_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     car_buttons = []
     for car in cars[-10:]:
-        label = f"{car['ID']} — {car['Марка']} {car['Модель']}"
-        car_buttons.append(
-            [InlineKeyboardButton(label, callback_data=f"repcar_{car['ID']}")]
+        label = (
+            f"{car['ID']} — "
+            f"{car['Марка']} {car['Модель']}"
         )
-    car_buttons.append([InlineKeyboardButton("◀️ Отмена", callback_data="fin_reports")])
+        car_buttons.append([InlineKeyboardButton(
+            label, callback_data=f"repcar_{car['ID']}"
+        )])
+    car_buttons.append([InlineKeyboardButton(
+        "◀️ Отмена", callback_data="fin_reports"
+    )])
     await query.edit_message_text(
         "🚗 *Отчёт по машине*\n\nВыберите машину:",
         reply_markup=InlineKeyboardMarkup(car_buttons),
@@ -1292,47 +1952,61 @@ async def report_car_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return REPORT_CAR
 
-async def report_car_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def report_car_selected(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     car_id = query.data.replace("repcar_", "")
     try:
         pay_ws = get_worksheet("ПЛАТЕЖИ")
         debt_ws = get_worksheet("ДОЛГИ")
-        pays = [r for r in pay_ws.get_all_records() if r.get("ID машины") == car_id]
-        debts = [r for r in debt_ws.get_all_records() if r.get("ID машины") == car_id]
+        pays = [
+            r for r in pay_ws.get_all_records()
+            if r.get("ID машины") == car_id
+        ]
+        debts = [
+            r for r in debt_ws.get_all_records()
+            if r.get("ID машины") == car_id
+        ]
 
         text = f"🚗 *Отчёт по машине {car_id}*\n\n"
 
-        # Платежи
         if pays:
             text += "💳 *Платежи:*\n"
             for p in pays:
-                icon = "📥" if p.get("Тип") == "Входящий" else "📤"
-                currency_sign = "¥" if p.get("Валюта") == "CNY" else "₽"
+                icon = (
+                    "📥" if p.get("Тип") == "Входящий"
+                    else "📤"
+                )
+                cs = "¥" if p.get("Валюта") == "CNY" else "₽"
                 text += (
                     f"{icon} {p.get('Категория')}: "
-                    f"*{p.get('Сумма')} {currency_sign}*"
+                    f"*{p.get('Сумма')} {cs}*"
                     f" ({p.get('Дата')})\n"
                 )
         else:
-            text += "💳 Платежей нет\n"
+            text += "💳 *Платежей нет*\n"
 
-        # Долги
         text += "\n⚖️ *Долги:*\n"
         if debts:
             for d in debts:
-                status_icon = "❌" if d.get("Статус") == "Не оплачен" else "✅"
-                currency_sign = "¥" if d.get("Валюта") == "CNY" else "₽"
+                si = (
+                    "❌" if d.get("Статус") == "Не оплачен"
+                    else "✅"
+                )
+                cs = "¥" if d.get("Валюта") == "CNY" else "₽"
                 text += (
-                    f"{status_icon} {d.get('Кто должен')} → "
+                    f"{si} {d.get('Кто должен')} → "
                     f"{d.get('Кому должен')}: "
-                    f"*{d.get('Сумма')} {currency_sign}*\n"
+                    f"*{d.get('Сумма')} {cs}*\n"
                 )
         else:
             text += "Долгов нет\n"
 
-        kb = [[InlineKeyboardButton("◀️ К отчётам", callback_data="fin_reports")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ К отчётам", callback_data="fin_reports"
+        )]]
         await query.edit_message_text(
             text,
             reply_markup=InlineKeyboardMarkup(kb),
@@ -1342,7 +2016,9 @@ async def report_car_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"report_car_selected error: {e}")
     return ConversationHandler.END
 
-async def report_pl(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def report_pl(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     try:
@@ -1355,38 +2031,38 @@ async def report_pl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         month_pays = []
         for r in pays:
             try:
-                d = datetime.strptime(r.get("Дата", ""), "%d.%m.%Y")
+                d = datetime.strptime(
+                    r.get("Дата", ""), "%d.%m.%Y"
+                )
                 if d.month == now.month and d.year == now.year:
                     month_pays.append(r)
             except:
                 pass
 
         income_rub = sum(
-            float(r.get("Сумма", 0))
-            for r in month_pays
-            if r.get("Тип") == "Входящий" and r.get("Валюта") == "RUB"
+            float(r.get("Сумма", 0)) for r in month_pays
+            if r.get("Тип") == "Входящий"
+            and r.get("Валюта") == "RUB"
         )
         income_cny = sum(
-            float(r.get("Сумма", 0))
-            for r in month_pays
-            if r.get("Тип") == "Входящий" and r.get("Валюта") == "CNY"
+            float(r.get("Сумма", 0)) for r in month_pays
+            if r.get("Тип") == "Входящий"
+            and r.get("Валюта") == "CNY"
         )
         expense_rub = sum(
-            float(r.get("Сумма", 0))
-            for r in month_pays
-            if r.get("Тип") == "Исходящий" and r.get("Валюта") == "RUB"
+            float(r.get("Сумма", 0)) for r in month_pays
+            if r.get("Тип") == "Исходящий"
+            and r.get("Валюта") == "RUB"
         )
         expense_cny = sum(
-            float(r.get("Сумма", 0))
-            for r in month_pays
-            if r.get("Тип") == "Исходящий" and r.get("Валюта") == "CNY"
+            float(r.get("Сумма", 0)) for r in month_pays
+            if r.get("Тип") == "Исходящий"
+            and r.get("Валюта") == "CNY"
         )
 
-        # Зарплаты за месяц
         month_str = now.strftime("%m.%Y")
         sal_total = sum(
-            float(r.get("Итого", 0))
-            for r in sals
+            float(r.get("Итого", 0)) for r in sals
             if r.get("Месяц") == month_str
         )
 
@@ -1399,12 +2075,17 @@ async def report_pl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"   Рубли: *{expense_rub:,.0f} ₽*\n"
         text += f"   Юани: *{expense_cny:,.0f} ¥*\n\n"
         text += f"👥 *Зарплаты: {sal_total:,.0f} ₽*\n\n"
-        text += f"💵 *ИТОГО (рубли):*\n"
-        text += f"   *{income_rub - expense_rub - sal_total:,.0f} ₽*\n"
-        text += f"💴 *ИТОГО (юани):*\n"
+        text += f"─────────────────\n"
+        text += f"💵 *Итого рубли:*\n"
+        text += (
+            f"   *{income_rub - expense_rub - sal_total:,.0f} ₽*\n"
+        )
+        text += f"💴 *Итого юани:*\n"
         text += f"   *{income_cny - expense_cny:,.0f} ¥*"
 
-        kb = [[InlineKeyboardButton("◀️ К отчётам", callback_data="fin_reports")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ К отчётам", callback_data="fin_reports"
+        )]]
         await query.edit_message_text(
             text,
             reply_markup=InlineKeyboardMarkup(kb),
@@ -1413,31 +2094,43 @@ async def report_pl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"report_pl error: {e}")
 
-async def report_debts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def report_debts(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     try:
         ws = get_worksheet("ДОЛГИ")
         records = ws.get_all_records()
-        unpaid = [r for r in records if r.get("Статус") == "Не оплачен"]
-        paid = [r for r in records if r.get("Статус") == "Оплачен"]
+        unpaid = [
+            r for r in records
+            if r.get("Статус") == "Не оплачен"
+        ]
+        paid = [
+            r for r in records
+            if r.get("Статус") == "Оплачен"
+        ]
 
         text = "⚖️ *Все долги*\n\n"
         if unpaid:
-            text += f"❌ *Не оплачено: {len(unpaid)}*\n"
+            text += f"❌ *Не оплачено: {len(unpaid)}*\n\n"
             for d in unpaid:
-                currency_sign = "¥" if d.get("Валюта") == "CNY" else "₽"
+                cs = "¥" if d.get("Валюта") == "CNY" else "₽"
                 text += (
-                    f"  {d.get('ID долга')} | {d.get('ID машины')}\n"
-                    f"  {d.get('Кто должен')} → {d.get('Кому должен')}: "
-                    f"*{d.get('Сумма')} {currency_sign}*\n"
+                    f"  *{d.get('ID долга')}* | "
+                    f"{d.get('ID машины')}\n"
+                    f"  {d.get('Кто должен')} → "
+                    f"{d.get('Кому должен')}: "
+                    f"*{d.get('Сумма')} {cs}*\n\n"
                 )
         else:
-            text += "✅ Все долги погашены!\n"
+            text += "✅ *Все долги погашены!*\n\n"
 
-        text += f"\n✅ *Оплачено за всё время: {len(paid)}*"
+        text += f"✅ Закрыто за всё время: {len(paid)}"
 
-        kb = [[InlineKeyboardButton("◀️ К отчётам", callback_data="fin_reports")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ К отчётам", callback_data="fin_reports"
+        )]]
         await query.edit_message_text(
             text,
             reply_markup=InlineKeyboardMarkup(kb),
@@ -1447,72 +2140,71 @@ async def report_debts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"report_debts error: {e}")
 
 # ===== СМЕНА ПАРОЛЯ =====
-async def fin_change_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def fin_change_password(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     query = update.callback_query
     await query.answer()
     if query.from_user.id != BOSS_ID:
-        kb = [[InlineKeyboardButton("◀️ Назад", callback_data="finance_menu")]]
+        kb = [[InlineKeyboardButton(
+            "◀️ Назад", callback_data="finance_menu"
+        )]]
         await query.edit_message_text(
             "❌ Только руководитель может менять пароль.",
             reply_markup=InlineKeyboardMarkup(kb)
         )
         return ConversationHandler.END
-    kb = [[InlineKeyboardButton("❌ Отмена", callback_data="finance_menu")]]
+    kb = [[InlineKeyboardButton(
+        "❌ Отмена", callback_data="finance_menu"
+    )]]
     await query.edit_message_text(
         "🔑 *Смена пароля*\n\nВведите новый пароль:",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode="Markdown"
     )
-    context.user_data["action"] = "set_password"
     return SET_PASSWORD
 
 # ===== РОУТЕР КНОПОК =====
-async def button_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_router(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     data = update.callback_query.data
-    if data == "yuan":
-        await show_yuan(update, context)
-    elif data == "duty":
-        await show_duty(update, context)
-    elif data == "menu":
-        await start(update, context)
-    elif data == "finance_menu":
-        await finance_menu(update, context)
-    elif data == "fin_cars":
-        await fin_cars(update, context)
-    elif data == "add_car":
-        await add_car_start(update, context)
-    elif data == "fin_pay":
-        await fin_pay_start(update, context)
-    elif data == "fin_debts":
-        await fin_debts(update, context)
-    elif data == "add_debt":
-        await add_debt_start(update, context)
-    elif data == "close_debt":
-        await close_debt(update, context)
+
+    routes = {
+        "yuan": show_yuan,
+        "duty": show_duty,
+        "menu": start,
+        "finance_menu": finance_menu,
+        "fin_cars": fin_cars,
+        "fin_pay": fin_pay_start,
+        "fin_debts": fin_debts,
+        "add_debt": add_debt_start,
+        "close_debt": close_debt,
+        "fin_sal": fin_sal,
+        "add_sal": add_sal_start,
+        "pay_sal": pay_sal,
+        "fin_reports": fin_reports,
+        "report_day": report_day,
+        "report_week": report_week,
+        "report_month": report_month,
+        "report_pl": report_pl,
+        "report_debts": report_debts,
+        "fin_chpass": fin_change_password,
+    }
+
+    instruction_keys = [
+        "inst_main", "inst_cars", "inst_pay",
+        "inst_debts", "inst_sal", "inst_reports"
+    ]
+
+    if data in routes:
+        await routes[data](update, context)
+    elif data in instruction_keys:
+        await show_instruction(update, context)
     elif data.startswith("closedebt_"):
         await close_debt_confirm(update, context)
-    elif data == "fin_sal":
-        await fin_sal(update, context)
-    elif data == "add_sal":
-        await add_sal_start(update, context)
-    elif data == "pay_sal":
-        await pay_sal(update, context)
     elif data.startswith("paysal_"):
         await pay_sal_confirm(update, context)
-    elif data == "fin_reports":
-        await fin_reports(update, context)
-    elif data == "report_day":
-        await report_day(update, context)
-    elif data == "report_week":
-        await report_week(update, context)
-    elif data == "report_month":
-        await report_month(update, context)
-    elif data == "report_pl":
-        await report_pl(update, context)
-    elif data == "report_debts":
-        await report_debts(update, context)
-    elif data == "fin_chpass":
-        await fin_change_password(update, context)
 
 # ===== ЗАПУСК =====
 def main():
@@ -1520,101 +2212,143 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Диалог входа в финансы
     auth_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(finance_enter, pattern="^finance_enter$")
-        ],
+        entry_points=[CallbackQueryHandler(
+            finance_enter, pattern="^finance_enter$"
+        )],
         states={
-            SET_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_password)],
-            ENTER_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_enter_password)],
+            SET_PASSWORD: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND,
+                handle_set_password
+            )],
+            ENTER_PASSWORD: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND,
+                handle_enter_password
+            )],
         },
         fallbacks=[CallbackQueryHandler(button_router)],
         per_message=False
     )
 
-    # Диалог добавления машины
     car_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(add_car_start, pattern="^add_car$")
-        ],
+        entry_points=[CallbackQueryHandler(
+            add_car_start, pattern="^add_car$"
+        )],
         states={
-            ADD_CAR_MARK: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_car_mark)],
-            ADD_CAR_MODEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_car_model)],
-            ADD_CAR_YEAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_car_year)],
-            ADD_CAR_COLOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_car_color)],
-            ADD_CAR_COMPLECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_car_complect)],
-            ADD_CAR_MILEAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_car_mileage)],
-            ADD_CAR_CLIENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_car_client)],
-            ADD_CAR_CLIENT_TYPE: [CallbackQueryHandler(add_car_client_type, pattern="^client_")],
+            ADD_CAR_MARK: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, add_car_mark
+            )],
+            ADD_CAR_MODEL: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, add_car_model
+            )],
+            ADD_CAR_YEAR: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, add_car_year
+            )],
+            ADD_CAR_COLOR: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, add_car_color
+            )],
+            ADD_CAR_COMPLECT: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, add_car_complect
+            )],
+            ADD_CAR_MILEAGE: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, add_car_mileage
+            )],
+            ADD_CAR_CLIENT: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, add_car_client
+            )],
+            ADD_CAR_CLIENT_TYPE: [CallbackQueryHandler(
+                add_car_client_type, pattern="^client_"
+            )],
         },
         fallbacks=[CallbackQueryHandler(button_router)],
         per_message=False
     )
 
-    # Диалог добавления платежа
     pay_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(fin_pay_start, pattern="^fin_pay$")
-        ],
+        entry_points=[CallbackQueryHandler(
+            fin_pay_start, pattern="^fin_pay$"
+        )],
         states={
-            PAY_CAR: [CallbackQueryHandler(pay_car_selected, pattern="^paycar_")],
-            PAY_CATEGORY: [CallbackQueryHandler(pay_category_selected, pattern="^paycat_")],
-            PAY_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, pay_amount)],
-            PAY_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, pay_comment)],
+            PAY_CAR: [CallbackQueryHandler(
+                pay_car_selected, pattern="^paycar_"
+            )],
+            PAY_CATEGORY: [CallbackQueryHandler(
+                pay_category_selected, pattern="^paycat_"
+            )],
+            PAY_AMOUNT: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, pay_amount
+            )],
+            PAY_COMMENT: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, pay_comment
+            )],
         },
         fallbacks=[CallbackQueryHandler(button_router)],
         per_message=False
     )
 
-    # Диалог добавления долга
     debt_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(add_debt_start, pattern="^add_debt$")
-        ],
+        entry_points=[CallbackQueryHandler(
+            add_debt_start, pattern="^add_debt$"
+        )],
         states={
-            DEBT_CAR: [CallbackQueryHandler(debt_car_selected, pattern="^debtcar_")],
-            DEBT_WHO: [CallbackQueryHandler(debt_type_selected, pattern="^debttype_")],
-            DEBT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, debt_amount)],
+            DEBT_CAR: [CallbackQueryHandler(
+                debt_car_selected, pattern="^debtcar_"
+            )],
+            DEBT_WHO: [CallbackQueryHandler(
+                debt_type_selected, pattern="^debttype_"
+            )],
+            DEBT_AMOUNT: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, debt_amount
+            )],
         },
         fallbacks=[CallbackQueryHandler(button_router)],
         per_message=False
     )
 
-    # Диалог зарплат
     sal_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(add_sal_start, pattern="^add_sal$")
-        ],
+        entry_points=[CallbackQueryHandler(
+            add_sal_start, pattern="^add_sal$"
+        )],
         states={
-            SAL_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, sal_name)],
-            SAL_OKLAD: [MessageHandler(filters.TEXT & ~filters.COMMAND, sal_oklad)],
-            SAL_BONUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, sal_bonus)],
-            SAL_MONTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, sal_month)],
+            SAL_NAME: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, sal_name
+            )],
+            SAL_OKLAD: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, sal_oklad
+            )],
+            SAL_BONUS: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, sal_bonus
+            )],
+            SAL_MONTH: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND, sal_month
+            )],
         },
         fallbacks=[CallbackQueryHandler(button_router)],
         per_message=False
     )
 
-    # Диалог смены пароля
     chpass_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(fin_change_password, pattern="^fin_chpass$")
-        ],
+        entry_points=[CallbackQueryHandler(
+            fin_change_password, pattern="^fin_chpass$"
+        )],
         states={
-            SET_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_password)],
+            SET_PASSWORD: [MessageHandler(
+                filters.TEXT & ~filters.COMMAND,
+                handle_set_password
+            )],
         },
         fallbacks=[CallbackQueryHandler(button_router)],
         per_message=False
     )
 
-    # Диалог отчёта по машине
     repcar_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(report_car_start, pattern="^report_car$")
-        ],
+        entry_points=[CallbackQueryHandler(
+            report_car_start, pattern="^report_car$"
+        )],
         states={
-            REPORT_CAR: [CallbackQueryHandler(report_car_selected, pattern="^repcar_")],
+            REPORT_CAR: [CallbackQueryHandler(
+                report_car_selected, pattern="^repcar_"
+            )],
         },
         fallbacks=[CallbackQueryHandler(button_router)],
         per_message=False
