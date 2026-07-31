@@ -93,6 +93,64 @@ def reset_connection():
     global _spreadsheet
     _spreadsheet = None
 
+# ===== ПАРОЛЬ В GOOGLE SHEETS =====
+def get_password_from_sheet():
+    """Читаем пароль из листа НАСТРОЙКИ"""
+    try:
+        sh = get_spreadsheet()
+        if not sh:
+            return None
+        # Пытаемся найти лист НАСТРОЙКИ
+        try:
+            ws = sh.worksheet("НАСТРОЙКИ")
+        except:
+            # Создаём лист если его нет
+            ws = sh.add_worksheet(title="НАСТРОЙКИ", rows=10, cols=2)
+            ws.update('A1', 'Ключ')
+            ws.update('B1', 'Значение')
+            ws.update('A2', 'password')
+            ws.update('B2', '')
+            return None
+
+        records = ws.get_all_records()
+        for r in records:
+            if r.get('Ключ') == 'password':
+                val = str(r.get('Значение', '')).strip()
+                return val if val else None
+        return None
+    except Exception as e:
+        logger.error(f"get_password_from_sheet error: {e}")
+        return None
+
+def save_password_to_sheet(password):
+    """Сохраняем пароль в лист НАСТРОЙКИ"""
+    try:
+        sh = get_spreadsheet()
+        if not sh:
+            return False
+        try:
+            ws = sh.worksheet("НАСТРОЙКИ")
+        except:
+            ws = sh.add_worksheet(title="НАСТРОЙКИ", rows=10, cols=2)
+            ws.update('A1', 'Ключ')
+            ws.update('B1', 'Значение')
+            ws.update('A2', 'password')
+            ws.update('B2', '')
+
+        records = ws.get_all_records()
+        for i, r in enumerate(records):
+            if r.get('Ключ') == 'password':
+                ws.update_cell(i + 2, 2, password)
+                logger.info("Пароль сохранён в Google Sheets")
+                return True
+
+        # Если строки нет — добавляем
+        ws.append_row(['password', password])
+        return True
+    except Exception as e:
+        logger.error(f"save_password_to_sheet error: {e}")
+        return False
+
 def get_next_id(sheet_name, prefix):
     try:
         ws = get_worksheet(sheet_name)
@@ -520,7 +578,9 @@ async def finance_enter(
 ):
     query = update.callback_query
     await query.answer()
-    saved_password = context.bot_data.get("finance_password")
+
+    # Читаем пароль из Google Sheets (не из памяти!)
+    saved_password = get_password_from_sheet()
 
     if not saved_password:
         if query.from_user.id == BOSS_ID:
@@ -528,7 +588,7 @@ async def finance_enter(
                 "◀️ В меню", callback_data="menu"
             )]]
             await query.edit_message_text(
-                "🔐 *Первый вход*\n\nПридумайте пароль:",
+                "🔐 *Первый вход*\n\nПридумайте пароль для финансового раздела:",
                 reply_markup=InlineKeyboardMarkup(kb),
                 parse_mode="Markdown"
             )
@@ -543,6 +603,7 @@ async def finance_enter(
             )
             return ConversationHandler.END
 
+    # Уже авторизован в этой сессии
     if context.user_data.get("finance_auth"):
         await show_finance_menu(query, context)
         return ConversationHandler.END
@@ -562,16 +623,30 @@ async def handle_set_password(
 ):
     password = update.message.text.strip()
     await update.message.delete()
-    context.bot_data["finance_password"] = password
-    context.user_data["finance_auth"] = True
-    kb = [[InlineKeyboardButton(
-        "💰 Открыть финансы", callback_data="finance_menu"
-    )]]
-    await update.message.chat.send_message(
-        "✅ *Пароль установлен!*",
-        reply_markup=InlineKeyboardMarkup(kb),
-        parse_mode="Markdown"
-    )
+
+    # Сохраняем в Google Sheets
+    ok = save_password_to_sheet(password)
+
+    if ok:
+        context.user_data["finance_auth"] = True
+        kb = [[InlineKeyboardButton(
+            "💰 Открыть финансы", callback_data="finance_menu"
+        )]]
+        await update.message.chat.send_message(
+            "✅ *Пароль установлен и сохранён!*\n\n"
+            "Теперь пароль не пропадёт после перезапуска бота.",
+            reply_markup=InlineKeyboardMarkup(kb),
+            parse_mode="Markdown"
+        )
+    else:
+        kb = [[InlineKeyboardButton(
+            "◀️ В меню", callback_data="menu"
+        )]]
+        await update.message.chat.send_message(
+            "❌ Ошибка при сохранении пароля. Попробуйте ещё раз.",
+            reply_markup=InlineKeyboardMarkup(kb),
+            parse_mode="Markdown"
+        )
     return ConversationHandler.END
 
 async def handle_enter_password(
@@ -579,8 +654,11 @@ async def handle_enter_password(
 ):
     password = update.message.text.strip()
     await update.message.delete()
-    saved = context.bot_data.get("finance_password")
-    if password == saved:
+
+    # Читаем пароль из Google Sheets
+    saved = get_password_from_sheet()
+
+    if saved and password == saved:
         context.user_data["finance_auth"] = True
         kb = [[InlineKeyboardButton(
             "💰 Открыть финансы", callback_data="finance_menu"
@@ -800,7 +878,7 @@ async def show_car_card(
         f"📅 Добавлена: {car.get('Дата добавления', '—')}"
     )
 
-    # Кнопка удаления доступна всем авторизованным пользователям
+    # Кнопка удаления доступна всем авторизованным
     kb = [
         [InlineKeyboardButton(
             "✏️ Редактировать",
@@ -1468,7 +1546,7 @@ async def delete_car_confirm(
     await query.answer()
     car_id = query.data.replace("delcar_", "")
 
-    # Проверяем авторизацию в финансах
+    # Проверяем авторизацию
     if not context.user_data.get("finance_auth"):
         kb = [[InlineKeyboardButton(
             "◀️ Назад", callback_data=f"car_{car_id}"
@@ -2730,8 +2808,11 @@ async def handle_old_password(
 ):
     old_pass = update.message.text.strip()
     await update.message.delete()
-    saved = context.bot_data.get("finance_password")
-    if old_pass != saved:
+
+    # Читаем из Google Sheets
+    saved = get_password_from_sheet()
+
+    if not saved or old_pass != saved:
         kb = [
             [InlineKeyboardButton(
                 "🔄 Попробовать снова",
@@ -2826,7 +2907,6 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Вход в финансы
     auth_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             finance_enter, pattern="^finance_enter$"
@@ -2845,7 +2925,6 @@ def main():
         per_message=False
     )
 
-    # Смена пароля
     chpass_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             fin_change_password, pattern="^fin_chpass$"
@@ -2864,7 +2943,6 @@ def main():
         per_message=False
     )
 
-    # Добавление машины
     car_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             add_car_start, pattern="^add_car$"
@@ -2907,7 +2985,6 @@ def main():
         per_message=False
     )
 
-    # Редактирование машины
     edit_car_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             edit_car_menu, pattern="^editcar_"
@@ -2938,7 +3015,6 @@ def main():
         per_message=False
     )
 
-    # Поиск машин
     search_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             car_search_start, pattern="^car_search$"
@@ -2953,7 +3029,6 @@ def main():
         per_message=False
     )
 
-    # Платёж из карточки машины
     pay_from_car_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             pay_from_car, pattern="^payfromcar_"
@@ -2975,7 +3050,6 @@ def main():
         per_message=False
     )
 
-    # Платёж из общего меню
     pay_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             fin_pay_start, pattern="^fin_pay$"
@@ -3000,7 +3074,6 @@ def main():
         per_message=False
     )
 
-    # Долги
     debt_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             add_debt_start, pattern="^add_debt$"
@@ -3021,7 +3094,6 @@ def main():
         per_message=False
     )
 
-    # Зарплаты
     sal_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             add_sal_start, pattern="^add_sal$"
@@ -3044,7 +3116,6 @@ def main():
         per_message=False
     )
 
-    # Отчёт по машине
     repcar_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             report_car_start, pattern="^report_car$"
@@ -3058,7 +3129,6 @@ def main():
         per_message=False
     )
 
-    # Порядок важен!
     app.add_handler(auth_conv)
     app.add_handler(chpass_conv)
     app.add_handler(search_conv)
